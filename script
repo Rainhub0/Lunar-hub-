@@ -14,26 +14,30 @@ local TweenService   = game:GetService("TweenService")
 -- ================================================================
 --  НАСТРОЙКИ — ЗАМЕНИТЕ ССЫЛКИ НА СВОИ
 -- ================================================================
-local KEYS_URL       = "https://gist.githubusercontent.com/Rainhub0/3659e45a1ee1c0d292507720f0294633/raw/9727b0802501f60826707525c1ed604b0876f49f/idk"
-local WEBHOOK_URL    = "https://discord.com/api/webhooks/1533848250354765824/ZXy77nRaxm5hnvu7CDR4Yd_aRFnIZ5yZODvShGCsJUn_q-SwYPfAEI6QkHJwiUmcD4Oc"  -- ваш вебхук
-local GET_KEY_LINK   = "ping @owner in discord for key"
-local KEY_FILE       = "LunarHub_key.txt"
+local KEYS_URL        = "https://gist.githubusercontent.com/Rainhub0/3659e45a1ee1c0d292507720f0294633/raw/9727b0802501f60826707525c1ed604b0876f49f/idk"
+local WEBHOOK_URL     = "https://discord.com/api/webhooks/1533848250354765824/ZXy77nRaxm5hnvu7CDR4Yd_aRFnIZ5yZODvShGCsJUn_q-SwYPfAEI6QkHJwiUmcD4Oc"  -- ваш вебхук
+local GET_KEY_LINK    = "ping @owner in discord for key"
+local KEY_FILE        = "LunarHub_key.txt"
 local ACTIVATIONS_FILE = "LunarHub_activations.txt"   -- файл для хранения времени активации
 
 -- ================================================================
---  HWID ПОЛУЧЕНИЕ
+--  HWID ПОЛУЧЕНИЕ (НОРМАЛИЗОВАННОЕ)
 -- ================================================================
 local function GetHWID()
+    local function sanitize(s)
+        return tostring(s):upper():gsub("[^%w]", "")
+    end
+
     if getdeviceid then
         local ok, result = pcall(getdeviceid)
         if ok and result and result ~= "" then
-            return tostring(result):upper()
+            return sanitize(result)
         end
     end
     if getmacaddress then
         local ok, result = pcall(getmacaddress)
         if ok and result and result ~= "" then
-            return tostring(result):upper():gsub("[^%w]","")
+            return sanitize(result)
         end
     end
     local userId = tostring(Players.LocalPlayer.UserId)
@@ -43,7 +47,7 @@ local function GetHWID()
     for i = 1, #str do
         hash = (hash * 31 + string.byte(str, i)) % 0xFFFFFFFF
     end
-    return string.format("HWID-%08X", hash)
+    return sanitize(string.format("HWID-%08X", hash))
 end
 
 -- ================================================================
@@ -61,7 +65,6 @@ local function LoadSavedKey()
     return nil
 end
 
--- Функции для работы с активациями
 local function GetActivationTime(key)
     local ok, data = pcall(function() return readfile(ACTIVATIONS_FILE) end)
     if not ok or not data then return nil end
@@ -90,7 +93,7 @@ local function SetActivationTime(key, timestamp)
 end
 
 -- ================================================================
---  ЗАГРУЗКА И ПРОВЕРКА КЛЮЧЕЙ (с учётом срока)
+--  ЗАГРУЗКА И ПРОВЕРКА КЛЮЧЕЙ (с учётом срока и HWID)
 -- ================================================================
 local function FetchLines(url)
     local ok, result = pcall(function() return game:HttpGet(url) end)
@@ -109,24 +112,30 @@ local function ValidateKey(enteredKey, hwid)
     local keyLines = FetchLines(KEYS_URL)
     if #keyLines == 0 then return "error" end
 
-    local keyData = nil  -- { key, duration, storedHwid }
+    local keyData = nil
+
     for _, line in ipairs(keyLines) do
-        -- Пробуем новый формат: ключ:срок:HWID
-        local k, dur, h = line:match("^(.-):(.-):(.-)$")
+        local k, dur, h = line:match("^%s*(.-)%s*:%s*(.-)%s*:%s*(.-)%s*$")
         if k and dur and h then
             if k == enteredKey then
-                keyData = { key = k, duration = dur, hwid = h }
+                keyData = {
+                    key = k,
+                    duration = dur,
+                    hwid = h:gsub("[^%w]", ""):upper()
+                }
                 break
             end
         else
-            -- Старый формат: ключ:HWID (срок считаем "forever")
-            local k, h = line:match("^(.-):(.-)$")
+            local k, h = line:match("^%s*(.-)%s*:%s*(.-)%s*$")
             if k and k == enteredKey then
-                keyData = { key = k, duration = "forever", hwid = h }
+                keyData = {
+                    key = k,
+                    duration = "forever",
+                    hwid = h:gsub("[^%w]", ""):upper()
+                }
                 break
-            elseif line == enteredKey then
-                -- Совсем старый (без HWID) – FREE и forever
-                keyData = { key = line, duration = "forever", hwid = "FREE" }
+            elseif line:match("^%s*" .. enteredKey .. "%s*$") then
+                keyData = { key = enteredKey, duration = "forever", hwid = "FREE" }
                 break
             end
         end
@@ -134,20 +143,16 @@ local function ValidateKey(enteredKey, hwid)
 
     if not keyData then return "bad_key" end
 
-    -- Проверка HWID (если ключ не FREE)
     if keyData.hwid ~= "FREE" and keyData.hwid ~= hwid then
         return "bad_hwid"
     end
 
-    -- Проверка срока действия
     if keyData.duration ~= "forever" then
         local activationTime = GetActivationTime(enteredKey)
         if not activationTime then
-            -- Первая активация → запоминаем текущее время
             activationTime = os.time()
             SetActivationTime(enteredKey, activationTime)
         end
-        -- Переводим срок в секунды
         local num, unit = keyData.duration:match("^(%d+)(%a)$")
         if num and unit then
             local seconds = tonumber(num)
@@ -164,7 +169,6 @@ local function ValidateKey(enteredKey, hwid)
         end
     end
 
-    -- Если всё ок, возвращаем "ok"
     return "ok"
 end
 
@@ -172,10 +176,28 @@ end
 --  ОТПРАВКА В ВЕБХУК (с фото, если возможно)
 -- ================================================================
 local function SendWebhook(username, hwid, key)
-    if WEBHOOK_URL == "" then return end
+    if not WEBHOOK_URL or WEBHOOK_URL == "" then return end
 
-    local data = {
-        content = nil,
+    -- Попытка получить скриншот
+    local screenshotData = nil
+    if saveviewport then
+        pcall(function()
+            local name = "LunarHub_screenshot.png"
+            saveviewport(name)
+            screenshotData = readfile(name)
+        end)
+    else
+        local camera = workspace.CurrentCamera
+        if camera and pcall(function() return camera.SaveViewportToFile end) then
+            pcall(function()
+                local name = "LunarHub_screenshot.png"
+                camera:SaveViewportToFile(name)
+                screenshotData = readfile(name)
+            end)
+        end
+    end
+
+    local payload = {
         embeds = {{
             title = "🔑 Новая активация!",
             color = 0x00FF00,
@@ -188,66 +210,45 @@ local function SendWebhook(username, hwid, key)
         }}
     }
 
-    -- Пытаемся сделать скриншот
-    local screenshotData = nil
-    if saveviewport then
-        local ok, result = pcall(function()
-            local name = "LunarHub_screenshot.png"
-            saveviewport(name)
-            return readfile(name)
-        end)
-        if ok and result then
-            screenshotData = result
-        end
-    elseif game:GetService("Workspace"):GetCamera().SaveViewportToFile then
-        local ok, result = pcall(function()
-            local name = "LunarHub_screenshot.png"
-            game:GetService("Workspace"):GetCamera():SaveViewportToFile(name)
-            return readfile(name)
-        end)
-        if ok and result then
-            screenshotData = result
-        end
-    end
-
-    -- Формируем multipart/form-data, если есть скриншот
+    -- Если есть скриншот, добавляем его в эмбед и отправляем через multipart/form-data
     if screenshotData then
+        payload.embeds[1].image = { url = "attachment://screenshot.png" }
+
         local boundary = "----LunarHubBoundary" .. tostring(math.random(100000, 999999))
-        local body = ""
-        for k, v in pairs(data) do
-            if type(v) == "string" then
-                body = body .. "--" .. boundary .. "\r\nContent-Disposition: form-data; name=\"" .. k .. "\"\r\n\r\n" .. v .. "\r\n"
-            elseif type(v) == "table" then
-                body = body .. "--" .. boundary .. "\r\nContent-Disposition: form-data; name=\"" .. k .. "\"\r\nContent-Type: application/json\r\n\r\n" .. HttpService:JSONEncode(v) .. "\r\n"
-            end
-        end
-        body = body .. "--" .. boundary .. "\r\nContent-Disposition: form-data; name=\"file\"; filename=\"screenshot.png\"\r\nContent-Type: image/png\r\n\r\n" .. screenshotData .. "\r\n"
-        body = body .. "--" .. boundary .. "--"
+        
+        -- Discord API требует, чтобы JSON передавался в поле 'payload_json'
+        local body = "--" .. boundary .. "\r\n" ..
+                     'Content-Disposition: form-data; name="payload_json"' .. "\r\n" ..
+                     "Content-Type: application/json\r\n\r\n" ..
+                     HttpService:JSONEncode(payload) .. "\r\n" ..
+                     "--" .. boundary .. "\r\n" ..
+                     'Content-Disposition: form-data; name="files[0]"; filename="screenshot.png"' .. "\r\n" ..
+                     "Content-Type: image/png\r\n\r\n" ..
+                     screenshotData .. "\r\n" ..
+                     "--" .. boundary .. "--"
 
         pcall(function()
-            HttpService:RequestAsync({
+            request({
                 Url = WEBHOOK_URL,
                 Method = "POST",
                 Headers = {
-                    ["Content-Type"] = "multipart/form-data; boundary=" .. boundary,
-                    ["Content-Length"] = #body
+                    ["Content-Type"] = "multipart/form-data; boundary=" .. boundary
                 },
                 Body = body
             })
         end)
     else
-        -- Отправляем только JSON
+        -- Отправка чистого JSON без картинки
         pcall(function()
-            HttpService:RequestAsync({
+            request({
                 Url = WEBHOOK_URL,
                 Method = "POST",
                 Headers = { ["Content-Type"] = "application/json" },
-                Body = HttpService:JSONEncode(data)
+                Body = HttpService:JSONEncode(payload)
             })
         end)
     end
 end
-
 -- ================================================================
 --  GUI КЛЮЧЕЙ (обновлён с учётом "expired" и отправки вебхука)
 -- ================================================================
@@ -707,60 +708,57 @@ local function LoadMainScript()
         ExposureCompensation = Lighting.ExposureCompensation,
     }
 
-	-- ===== ФУНКЦИИ ДЛЯ ИНФОРМАЦИИ О КЛЮЧЕ =====
-local function ParseDuration(dur)
-    if dur == "forever" then return nil end
-    local num, unit = dur:match("^(%d+)(%a)$")
-    if num and unit then
-        local seconds = tonumber(num)
-        if unit == "d" then seconds = seconds * 86400
-        elseif unit == "h" then seconds = seconds * 3600
-        elseif unit == "m" then seconds = seconds * 60
-        else return 0 end
-        return seconds
+    -- ===== ФУНКЦИИ ДЛЯ ИНФОРМАЦИИ О КЛЮЧЕ =====
+    local function ParseDuration(dur)
+        if dur == "forever" then return nil end
+        local num, unit = dur:match("^(%d+)(%a)$")
+        if num and unit then
+            local seconds = tonumber(num)
+            if unit == "d" then seconds = seconds * 86400
+            elseif unit == "h" then seconds = seconds * 3600
+            elseif unit == "m" then seconds = seconds * 60
+            else return 0 end
+            return seconds
+        end
+        return 0
     end
-    return 0
-end
 
-local function GetKeyInfo()
-    local key = LoadSavedKey()
-    if not key then return nil end
-    local keyLines = FetchLines(KEYS_URL)
-    local duration = "unknown"
-    for _, line in ipairs(keyLines) do
-        -- Новый формат: ключ:срок:HWID
-        local k, dur, h = line:match("^(.-):(.-):(.-)$")
-        if k and k == key then
-            duration = dur
-            break
+    local function GetKeyInfo()
+        local key = LoadSavedKey()
+        if not key then return nil end
+        local keyLines = FetchLines(KEYS_URL)
+        local duration = "unknown"
+        for _, line in ipairs(keyLines) do
+            local k, dur, h = line:match("^%s*(.-)%s*:%s*(.-)%s*:%s*(.-)%s*$")
+            if k and k == key then
+                duration = dur
+                break
+            end
+            local k_old, h_old = line:match("^%s*(.-)%s*:%s*(.-)%s*$")
+            if k_old and k_old == key then
+                duration = "forever"
+                break
+            end
+            if line:match("^%s*" .. key .. "%s*$") then
+                duration = "forever"
+                break
+            end
         end
-        -- Старый формат: ключ:HWID (считаем forever)
-        local k_old, h_old = line:match("^(.-):(.-)$")
-        if k_old and k_old == key then
-            duration = "forever"
-            break
+        local activationTime = GetActivationTime(key)
+        local remaining = nil
+        if duration ~= "forever" and duration ~= "unknown" and activationTime then
+            local totalSec = ParseDuration(duration)
+            if totalSec then
+                remaining = activationTime + totalSec - os.time()
+            end
         end
-        -- Совсем старый: просто ключ
-        if line == key then
-            duration = "forever"
-            break
-        end
+        return {
+            key = key,
+            duration = duration,
+            activationTime = activationTime,
+            remaining = remaining,
+        }
     end
-    local activationTime = GetActivationTime(key)
-    local remaining = nil
-    if duration ~= "forever" and duration ~= "unknown" and activationTime then
-        local totalSec = ParseDuration(duration)
-        if totalSec then
-            remaining = activationTime + totalSec - os.time()
-        end
-    end
-    return {
-        key = key,
-        duration = duration,
-        activationTime = activationTime,
-        remaining = remaining,
-    }
-end
 
     -- ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
     local function safeMouseMoveRel(x, y)
@@ -3524,40 +3522,40 @@ end
     -- ============================
     local KeyInfoGroup = Tabs.Settings:AddRightGroupbox('Информация о ключе')
 
--- Создаем отдельные метки под каждую строчку
-local KeyLabel       = KeyInfoGroup:AddLabel('Ключ: Загрузка...')
-local DurationLabel  = KeyInfoGroup:AddLabel('Срок: Загрузка...')
-local RemainingLabel = KeyInfoGroup:AddLabel('Осталось: Загрузка...')
+    local KeyLabel       = KeyInfoGroup:AddLabel('Ключ: Загрузка...')
+    local DurationLabel  = KeyInfoGroup:AddLabel('Срок: Загрузка...')
+    local RemainingLabel = KeyInfoGroup:AddLabel('Осталось: Загрузка...')
 
-task.spawn(function()
-    while true do
-        task.wait(1)
-        if Library.Unloaded then break end
-        
-        local info = GetKeyInfo()
-        if info then
-            KeyLabel:SetText("Ключ: " .. tostring(info.key))
-            DurationLabel:SetText("Срок: " .. tostring(info.duration))
-            
-            if info.duration ~= "forever" and info.remaining and info.remaining > 0 then
-                local days    = math.floor(info.remaining / 86400)
-                local hours   = math.floor((info.remaining % 86400) / 3600)
-                local minutes = math.floor((info.remaining % 3600) / 60)
-                local seconds = math.floor(info.remaining % 60)
-                
-                RemainingLabel:SetText(string.format("Осталось: %02dд %02dч %02dм %02dс", days, hours, minutes, seconds))
-            elseif info.duration == "forever" then
-                RemainingLabel:SetText("Осталось: ∞ (навсегда)")
+    task.spawn(function()
+        while true do
+            task.wait(1)
+            if Library.Unloaded then break end
+
+            local info = GetKeyInfo()
+            if info then
+                KeyLabel:SetText("Ключ: " .. tostring(info.key))
+                DurationLabel:SetText("Срок: " .. tostring(info.duration))
+
+                if info.duration ~= "forever" and info.remaining and info.remaining > 0 then
+                    local days    = math.floor(info.remaining / 86400)
+                    local hours   = math.floor((info.remaining % 86400) / 3600)
+                    local minutes = math.floor((info.remaining % 3600) / 60)
+                    local seconds = math.floor(info.remaining % 60)
+
+                    RemainingLabel:SetText(string.format("Осталось: %02dд %02dч %02dм %02dс", days, hours, minutes, seconds))
+                elseif info.duration == "forever" then
+                    RemainingLabel:SetText("Осталось: ∞ (навсегда)")
+                else
+                    RemainingLabel:SetText("Осталось: истёк или неизвестно")
+                end
             else
-                RemainingLabel:SetText("Осталось: истёк или неизвестно")
+                KeyLabel:SetText("Информация о ключе недоступна")
+                DurationLabel:SetText("")
+                RemainingLabel:SetText("")
             end
-        else
-            KeyLabel:SetText("Информация о ключе недоступна")
-            DurationLabel:SetText("")
-            RemainingLabel:SetText("")
         end
-    end
-end)
+    end)
+
     local MenuGroup = Tabs.Settings:AddLeftGroupbox('Menu Management')
     MenuGroup:AddLabel('Menu Key')
         :AddKeyPicker('MenuKeybind', {
