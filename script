@@ -1,0 +1,2969 @@
+-- ==================== ЗАГРУЗКА БИБЛИОТЕК ====================
+local Library = loadstring(game:HttpGet("https://gist.githubusercontent.com/Rainhub0/58588fc52c695feec2489c30c689c360/raw/480a043a154529b42ba0bf8cd9d8d0779bc20a24/gistfile1.txt"))()
+local ThemeManager = loadstring(game:HttpGet("https://gist.githubusercontent.com/Rainhub0/97b84c90469bf93f11299098817ab9e6/raw/80461129799c6a3d4c539b8dcd10073fe6eea22d/gistfile1.txt"))()
+local SaveManager = loadstring(game:HttpGet("https://gist.githubusercontent.com/Rainhub0/438f7f9b898ef88f891d3daa9bafb3aa/raw/2a3964b8c3fda8aa2c20b0af80a1fccc54afb0f6/gistfile1.txt"))()
+
+Library.GetIcon = function() end
+Library.GetCustomIcon = function() return nil end
+
+-- ==================== СЕРВИСЫ ====================
+local Players          = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService       = game:GetService("RunService")
+local Workspace        = game:GetService("Workspace")
+local Lighting         = game:GetService("Lighting")
+local CoreGui          = game:GetService("CoreGui")
+local SoundService     = game:GetService("SoundService")
+local HttpService      = game:GetService("HttpService")
+local TweenService     = game:GetService("TweenService")
+local Debris           = game:GetService("Debris")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera      = Workspace.CurrentCamera
+local Mouse       = LocalPlayer:GetMouse()
+local Toggles     = Library.Toggles
+local Options     = Library.Options
+
+-- ==================== АЛИАСЫ ====================
+local WorldToViewportPoint    = function(pos) return Camera:WorldToViewportPoint(pos) end
+local GetPartsObscuringTarget = function(pts, ignore) return Camera:GetPartsObscuringTarget(pts, ignore) end
+local GetMouseLocation        = function() return UserInputService:GetMouseLocation() end
+local FindFirstChild          = function(obj, name) return obj:FindFirstChild(name) end
+
+-- ==================== ГЛОБАЛЬНОЕ СОСТОЯНИЕ ====================
+local SavedPositions     = {}
+local ESPCache           = {}
+local CachedSilentTarget = nil
+local LastTargetPlayer   = nil
+local EnemyHealthCache   = {}
+local SpinVelocity       = nil
+local JumpConnection     = nil
+
+-- ==================== КЭШ ИГРОКОВ ====================
+local CachedPlayers = {}
+local function RebuildPlayerCache()
+    CachedPlayers = {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer then
+            table.insert(CachedPlayers, p)
+        end
+    end
+end
+RebuildPlayerCache()
+Players.PlayerAdded:Connect(function() task.wait(0.1); RebuildPlayerCache() end)
+Players.PlayerRemoving:Connect(function() task.wait(0.1); RebuildPlayerCache() end)
+
+-- ==================== КЭШ ЧАСТЕЙ ПЕРСОНАЖА ====================
+local NoClipParts = {}
+local function RebuildNoClipCache(char)
+    NoClipParts = {}
+    if not char then return end
+    for _, part in ipairs(char:GetDescendants()) do
+        if part:IsA("BasePart") then
+            table.insert(NoClipParts, part)
+        end
+    end
+end
+LocalPlayer.CharacterAdded:Connect(function(char)
+    task.wait(0.5)
+    RebuildNoClipCache(char)
+end)
+if LocalPlayer.Character then RebuildNoClipCache(LocalPlayer.Character) end
+
+-- ==================== РЕЕСТР ВНЕШНИХ СКРИПТОВ ====================
+local ScriptRegistry = {
+    Dex           = { Url = "https://gist.githubusercontent.com/Rainhub0/c1bd1bc446460971687a61be49a7bdd7/raw/51d52fc0b537015052649f71b9d6a5ff22791a65/gistfile1.txt" },
+    WorldESP      = { Url = "https://gist.githubusercontent.com/Rainhub0/4e9f8ff59cba7cba164b6a9181f83cd6/raw/55dcb2ca31a47dca872b56b1051cee9bfc0f0c3a/gistfile1.txt" },
+    InfiniteYield = { Url = "https://gist.githubusercontent.com/Rainhub0/0954f9aa9df8632f2cef7c2d1086fdcb/raw/d9c288cb862ee9af9ea229ee5cf87123b45fe1fb/gistfile1.txt" },
+    Cobalt        = { Url = "https://gist.githubusercontent.com/Rainhub0/5a3c866f9290da8c5f4ecd5256e62608/raw/adfbb2ee02b2aa495d2bd81afb98f16ee1e6d7a0/gistfile1.txt" },
+    SimpleSpy     = { Url = "https://pastebin.com/raw/3KPFBNdx" },
+    ThirdPerson   = { Url = "https://pastebin.com/raw/039zjvYa" },
+    Shaders       = { Url = "https://pastebin.com/raw/7eQtw5C8" },
+    Fishing       = { Url = "https://gist.githubusercontent.com/Rainhub0/aea28e4d7656ef20f8bcb8a0ac7d03f9/raw/ff425070c5877d14eb451ad6643cbef4140f0497/gistfile1.txt" },
+    Animation     = { Url = "https://pastebin.com/raw/mgbKCCbs" },
+}
+
+-- ==================== КОНФИГУРАЦИЯ ====================
+local Config = {
+    SpeedWalk      = false, SpeedWalkValue    = 50,
+    SpeedCFrame    = false, SpeedCFrameValue  = 60,
+    InfiniteJump   = false,
+    JumpPower      = false, JumpPowerValue    = 100,
+
+    Gravity      = false, GravityValue = 196.2,
+    Fly          = false, FlySpeed     = 80,
+    NoClip       = false,
+    Spider       = false,
+
+    AntiFling = false,
+
+    AimBot            = false,
+    AimBotShowFOV     = false,
+    AimBotPart        = "Head",
+    AimBotFOV         = 50,
+    AimBotSmooth      = 5,
+    AimBotMaxDistance = 500,
+
+    SilentAimEnabled         = false,
+    SilentAimTargetPart      = "HumanoidRootPart",
+    SilentAimMethod          = "Raycast",
+    SilentAimFOV             = 130,
+    SilentAimHitChance       = 100,
+    VisibleCheck             = false,
+    TeamCheck                = false,
+    MouseHitPrediction       = false,
+    MouseHitPredictionAmount = 0.165,
+    ShowSilentAimTarget      = false,
+
+    Hitbox = {
+        Enabled    = false,
+        Mode       = "Legit",
+        LegitSize  = 4,
+        RageSize   = 15,
+        TargetPart = "Head",
+        Color      = Color3.fromRGB(255, 0, 0),
+        ShowVisual = true,
+    },
+
+    AntiAim = {
+        Enabled = false,
+        Mode    = "Spin",
+    },
+
+    Triggerbot = { Enabled = false, Delay = 0.02 },
+    HitLog     = { Enabled = true },
+
+    Fullbright       = false,
+    NoFog            = false,
+    CustomFOVEnabled = false, CustomFOV = 70,
+    Style            = "Normal",
+
+    ESP = {
+        Enabled        = false,
+        Names          = false,
+        Tracers        = false,
+        TracerOrigin   = "Bottom Center",
+        Skeleton       = false,
+        Arrows         = false,
+        BoxEnabled     = false,
+        BoxMode        = "2D Box",
+        ChamsEnabled   = false,
+        ChamsStyle     = "Highlight",
+        ChamsFillColor = Color3.fromRGB(255, 0, 0),
+        RainbowESP     = false,
+        MechChams      = false,
+        MechColor      = Color3.fromRGB(255, 255, 255),
+        NameColor      = Color3.fromRGB(255, 255, 255),
+        TracerColor    = Color3.fromRGB(0, 255, 255),
+        SkeletonColor  = Color3.fromRGB(0, 255, 0),
+        ArrowColor     = Color3.fromRGB(255, 150, 0),
+        ESPColor       = Color3.fromRGB(255, 255, 255),
+        VisibleCheck   = false,
+        VisibleColor   = Color3.fromRGB(0, 255, 0),
+    },
+
+    Crosshair = {
+        Enabled   = false,
+        Size      = 10,
+        Gap       = 5,
+        Thickness = 2,
+        Color     = Color3.fromRGB(0, 255, 0),
+        Spin      = false,
+        SpinSpeed = 100,
+    },
+
+    BulletTracers = {
+        Enabled  = false,
+        Color    = Color3.fromRGB(255, 255, 0),
+        Duration = 1,
+        Fade     = true,
+        Style    = "Normal",
+    },
+
+    CarSpeed      = false, CarSpeedValue = 200,
+    CarFly        = false, CarFlyUp      = false,
+
+    TeleportClick = false,
+    DeleteClick   = false,
+    Whitelist     = {},
+    TargetHUD     = { Enabled = false },
+    HitSoundEnabled  = false,
+    NormalHitSound   = "rbxassetid://160432334",
+    HeadshotHitSound = "rbxassetid://4764109000",
+}
+
+_G.MainConfig = Config
+
+local OriginalGravity  = Workspace.Gravity
+local OriginalLighting = {
+    Ambient              = Lighting.Ambient,
+    OutdoorAmbient       = Lighting.OutdoorAmbient,
+    Brightness           = Lighting.Brightness,
+    FogEnd               = Lighting.FogEnd,
+    GlobalShadows        = Lighting.GlobalShadows,
+    ExposureCompensation = Lighting.ExposureCompensation,
+}
+
+-- ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
+local function safeMouseMoveRel(x, y)
+    pcall(function() mousemoverel(x, y) end)
+end
+
+local function CalculateChance(pct)
+    return math.random(1, 100) <= math.floor(pct)
+end
+
+local function getDirection(origin, position)
+    return (position - origin).Unit * 1000
+end
+
+local function IsPlayerVisible(player)
+    local pc  = player.Character
+    local lpc = LocalPlayer.Character
+    if not pc or not lpc then return false end
+    local root = FindFirstChild(pc, Config.SilentAimTargetPart)
+              or FindFirstChild(pc, "HumanoidRootPart")
+    if not root then return false end
+    return #GetPartsObscuringTarget({root.Position}, {lpc, pc}) == 0
+end
+
+local function RunRegisteredScript(key)
+    local data = ScriptRegistry[key]
+    if not data then return end
+    Library:Notify("Loading " .. key .. "...", 2)
+    local ok, err = pcall(function()
+        loadstring(game:HttpGet(data.Url))()
+    end)
+    if ok then
+        Library:Notify(key .. " loaded!", 2)
+    else
+        Library:Notify("Error: " .. tostring(err), 4)
+    end
+end
+
+-- ==================== ОЧИСТКА ЧАМСОВ ====================
+local OriginalPartMaterials = {}
+
+local function SaveOriginalMaterials(char)
+    if not char then return end
+    OriginalPartMaterials[char] = {}
+    for _, part in ipairs(char:GetDescendants()) do
+        if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+            OriginalPartMaterials[char][part] = {
+                Material = part.Material,
+                Color    = part.Color,
+            }
+        end
+    end
+end
+
+local function RestoreForceFieldMaterials(char)
+    if not char then return end
+    local saved = OriginalPartMaterials[char]
+    if not saved then return end
+    for _, part in ipairs(char:GetDescendants()) do
+        if part:IsA("BasePart") and saved[part] then
+            pcall(function()
+                part.Material = saved[part].Material
+                part.Color    = saved[part].Color
+            end)
+        end
+    end
+end
+
+local function RemoveMechChamsFromChar(char)
+    if not char then return end
+    for _, part in ipairs(char:GetChildren()) do
+        if part:IsA("BasePart") then
+            local adorn = part:FindFirstChild("LunarMechAdornment")
+            if adorn then pcall(function() adorn:Destroy() end) end
+        end
+    end
+end
+
+local function RemoveAllMechChams()
+    for _, player in ipairs(CachedPlayers) do
+        if player.Character then
+            RemoveMechChamsFromChar(player.Character)
+        end
+    end
+end
+
+local function RemoveAllHighlights()
+    for _, player in ipairs(CachedPlayers) do
+        if player.Character then
+            local hl = player.Character:FindFirstChildOfClass("Highlight")
+            if hl then pcall(function() hl:Destroy() end) end
+            if ESPCache[player] then
+                ESPCache[player].Highlight = nil
+            end
+        end
+    end
+end
+
+local function RemoveAllForceFields()
+    for _, player in ipairs(CachedPlayers) do
+        if player.Character then
+            RestoreForceFieldMaterials(player.Character)
+        end
+    end
+end
+
+-- ==================== SKYBOX ====================
+local OriginalSkyColors = {}
+local function ApplySkybox(name)
+    if not OriginalSkyColors.saved then
+        OriginalSkyColors.Ambient        = Lighting.Ambient
+        OriginalSkyColors.OutdoorAmbient = Lighting.OutdoorAmbient
+        OriginalSkyColors.Brightness     = Lighting.Brightness
+        OriginalSkyColors.FogColor       = Lighting.FogColor
+        OriginalSkyColors.FogEnd         = Lighting.FogEnd
+        OriginalSkyColors.saved          = true
+    end
+    if name == "Default" then
+        Lighting.Ambient        = OriginalSkyColors.Ambient
+        Lighting.OutdoorAmbient = OriginalSkyColors.OutdoorAmbient
+        Lighting.Brightness     = OriginalSkyColors.Brightness
+        Lighting.FogColor       = OriginalSkyColors.FogColor
+        Lighting.FogEnd         = OriginalSkyColors.FogEnd
+    elseif name == "Night" then
+        Lighting.Ambient        = Color3.fromRGB(10, 10, 30)
+        Lighting.OutdoorAmbient = Color3.fromRGB(5, 5, 20)
+        Lighting.Brightness     = 0.1
+        Lighting.FogColor       = Color3.fromRGB(5, 5, 25)
+        Lighting.FogEnd         = 800
+    elseif name == "Space" then
+        Lighting.Ambient        = Color3.fromRGB(0, 0, 0)
+        Lighting.OutdoorAmbient = Color3.fromRGB(0, 0, 0)
+        Lighting.Brightness     = 0
+        Lighting.FogEnd         = 100000
+    elseif name == "Sunset" then
+        Lighting.Ambient        = Color3.fromRGB(120, 60, 20)
+        Lighting.OutdoorAmbient = Color3.fromRGB(200, 80, 30)
+        Lighting.Brightness     = 1.5
+        Lighting.FogColor       = Color3.fromRGB(255, 120, 50)
+        Lighting.FogEnd         = 600
+    end
+end
+
+-- ==================== TARGET HUD ====================
+local TargetHUD_Screen = Instance.new("ScreenGui")
+TargetHUD_Screen.Name   = "TargetHUD_System"
+TargetHUD_Screen.Parent = CoreGui
+
+local HUD_Main = Instance.new("Frame")
+HUD_Main.Size             = UDim2.new(0, 280, 0, 90)
+HUD_Main.Position         = UDim2.new(0.5, -140, 0.75, 0)
+HUD_Main.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+HUD_Main.BorderSizePixel  = 0
+HUD_Main.Visible          = false
+HUD_Main.Parent           = TargetHUD_Screen
+Instance.new("UICorner", HUD_Main).CornerRadius = UDim.new(0, 8)
+local HUD_Stroke = Instance.new("UIStroke", HUD_Main)
+HUD_Stroke.Color     = Color3.fromRGB(54, 57, 241)
+HUD_Stroke.Thickness = 1.5
+
+local AvatarImage = Instance.new("ImageLabel", HUD_Main)
+AvatarImage.Size             = UDim2.new(0, 70, 0, 70)
+AvatarImage.Position         = UDim2.new(0, 10, 0, 10)
+AvatarImage.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+AvatarImage.BorderSizePixel  = 0
+Instance.new("UICorner", AvatarImage).CornerRadius = UDim.new(0, 6)
+
+local function makeLabel(parent, size, pos, textSize, color, font, align)
+    local l = Instance.new("TextLabel", parent)
+    l.Size                   = size
+    l.Position               = pos
+    l.TextSize               = textSize
+    l.TextColor3             = color
+    l.Font                   = font or Enum.Font.SourceSans
+    l.TextXAlignment         = align or Enum.TextXAlignment.Left
+    l.BackgroundTransparency = 1
+    return l
+end
+
+local EnemyName   = makeLabel(HUD_Main, UDim2.new(0,180,0,20), UDim2.new(0,90,0,10),  14, Color3.fromRGB(255,255,255), Enum.Font.SourceSansBold)
+local EnemyWeapon = makeLabel(HUD_Main, UDim2.new(0,180,0,20), UDim2.new(0,90,0,32),  13, Color3.fromRGB(180,180,180))
+
+local EnemyHPBarBack = Instance.new("Frame", HUD_Main)
+EnemyHPBarBack.Size             = UDim2.new(0, 180, 0, 12)
+EnemyHPBarBack.Position         = UDim2.new(0, 90, 0, 58)
+EnemyHPBarBack.BackgroundColor3 = Color3.fromRGB(40, 10, 10)
+EnemyHPBarBack.BorderSizePixel  = 0
+
+local EnemyHPBar = Instance.new("Frame", EnemyHPBarBack)
+EnemyHPBar.Size             = UDim2.new(1, 0, 1, 0)
+EnemyHPBar.BackgroundColor3 = Color3.fromRGB(241, 54, 54)
+EnemyHPBar.BorderSizePixel  = 0
+
+local EnemyHPText = makeLabel(EnemyHPBarBack, UDim2.new(1,0,1,0), UDim2.new(0,0,0,0), 11, Color3.fromRGB(255,255,255), Enum.Font.SourceSansBold, Enum.TextXAlignment.Center)
+
+local function UpdateTargetHUD(player)
+    if not player or not player.Character or not Config.TargetHUD.Enabled then
+        HUD_Main.Visible = false
+        return
+    end
+    local hum = player.Character:FindFirstChildOfClass("Humanoid")
+    if not hum or hum.Health <= 0 then HUD_Main.Visible = false; return end
+
+    EnemyName.Text   = player.DisplayName or player.Name
+    EnemyHPText.Text = string.format("%d / %d HP", math.floor(hum.Health), math.floor(hum.MaxHealth))
+    EnemyHPBar.Size  = UDim2.new(math.clamp(hum.Health / hum.MaxHealth, 0, 1), 0, 1, 0)
+
+    local tool = player.Character:FindFirstChildOfClass("Tool")
+    if not tool then
+        local bp = player:FindFirstChild("Backpack")
+        tool = bp and bp:FindFirstChildOfClass("Tool")
+    end
+    EnemyWeapon.Text = "Weapon: " .. (tool and tool.Name or "None")
+
+    task.spawn(function()
+        local ok, thumb = pcall(function()
+            return Players:GetUserThumbnailAsync(
+                player.UserId,
+                Enum.ThumbnailType.HeadShot,
+                Enum.ThumbnailSize.Size100x100
+            )
+        end)
+        if ok and thumb then AvatarImage.Image = thumb end
+    end)
+    HUD_Main.Visible = true
+end
+
+-- ==================== HIT SOUND ====================
+local function PlayHitSound(isHeadshot)
+    if not Config.HitSoundEnabled then return end
+    local sound = Instance.new("Sound")
+    sound.SoundId = isHeadshot and Config.HeadshotHitSound or Config.NormalHitSound
+    sound.Volume  = 2
+    sound.Parent  = SoundService
+    sound:Play()
+    sound.Ended:Connect(function() sound:Destroy() end)
+end
+
+-- ==================== DAMAGE INDICATOR ====================
+local function ShowDamageIndicator(position, damage, isHeadshot)
+    local part = Instance.new("Part")
+    part.Anchored     = true
+    part.CanCollide   = false
+    part.Transparency = 1
+    part.Size         = Vector3.new(0.1, 0.1, 0.1)
+    part.Position     = position + Vector3.new(0, 2, 0)
+    part.Parent       = Workspace
+
+    local billboard = Instance.new("BillboardGui", part)
+    billboard.Size        = UDim2.new(0, 100, 0, 40)
+    billboard.StudsOffset = Vector3.new(math.random(-1, 1), math.random(2, 4), 0)
+    billboard.AlwaysOnTop = true
+    billboard.Adornee     = part
+
+    local label = Instance.new("TextLabel", billboard)
+    label.Size                   = UDim2.new(1, 0, 1, 0)
+    label.BackgroundTransparency = 1
+    label.Text                   = (isHeadshot and "💀 " or "") .. math.floor(damage)
+    label.TextColor3             = isHeadshot and Color3.fromRGB(255, 50, 50) or Color3.fromRGB(255, 220, 0)
+    label.TextStrokeTransparency = 0
+    label.TextStrokeColor3       = Color3.fromRGB(0, 0, 0)
+    label.Font                   = Enum.Font.GothamBold
+    label.TextSize               = isHeadshot and 22 or 18
+
+    task.spawn(function()
+        local t0 = tick()
+        while tick() - t0 < 1.2 do
+            local t = (tick() - t0) / 1.2
+            part.Position                = position + Vector3.new(0, 2 + t * 3, 0)
+            label.TextTransparency       = t
+            label.TextStrokeTransparency = t
+            task.wait()
+        end
+        billboard:Destroy()
+        part:Destroy()
+    end)
+end
+
+-- ==================== HIT LOG ====================
+local HitLogGui  = Instance.new("ScreenGui")
+HitLogGui.Name   = "LunarHitLog"
+HitLogGui.Parent = CoreGui
+
+local HitLogFrame = Instance.new("Frame", HitLogGui)
+HitLogFrame.BackgroundTransparency = 1
+HitLogFrame.Position = UDim2.new(0.02, 0, 0.6, 0)
+HitLogFrame.Size     = UDim2.new(0, 350, 0, 200)
+
+local HitLogLayout = Instance.new("UIListLayout", HitLogFrame)
+HitLogLayout.SortOrder = Enum.SortOrder.LayoutOrder
+HitLogLayout.Padding   = UDim.new(0, 4)
+
+do
+    local dragging, dragStart, startPos = false, nil, nil
+    HitLogFrame.InputBegan:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseButton2 then
+            dragging  = true
+            dragStart = UserInputService:GetMouseLocation()
+            startPos  = HitLogFrame.Position
+        end
+    end)
+    HitLogFrame.InputEnded:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseButton2 then
+            dragging = false
+        end
+    end)
+    RunService.RenderStepped:Connect(function()
+        if not dragging then return end
+        local m     = UserInputService:GetMouseLocation()
+        local delta = m - dragStart
+        HitLogFrame.Position = UDim2.new(
+            startPos.X.Scale, startPos.X.Offset + delta.X,
+            startPos.Y.Scale, startPos.Y.Offset + delta.Y
+        )
+    end)
+end
+
+local function AddToHitLog(targetPlayer, partName, damage, distance)
+    if not Config.HitLog.Enabled then return end
+    local label = Instance.new("TextLabel", HitLogFrame)
+    label.BackgroundTransparency = 0.5
+    label.BackgroundColor3       = Color3.fromRGB(20, 20, 20)
+    label.Size                   = UDim2.new(1, 0, 0, 20)
+    label.Font                   = Enum.Font.GothamBold
+    label.TextSize               = 14
+    label.TextXAlignment         = Enum.TextXAlignment.Left
+    label.TextColor3 = (partName == "Head")
+        and Color3.fromRGB(255, 50, 50)
+        or  Color3.fromRGB(50, 255, 50)
+    label.Text = string.format(
+        "[Lunar] Hit %s in %s for %d dmg (%d studs)",
+        targetPlayer.Name, partName or "Body",
+        math.floor(damage), math.floor(distance)
+    )
+    Debris:AddItem(label, 4)
+end
+
+-- ==================== BULLET TRACERS ====================
+local function CreateBulletTracer(origin, hitPoint)
+    if not Config.BulletTracers.Enabled then return end
+    local tracer = Instance.new("Part")
+    tracer.Anchored   = true
+    tracer.CanCollide = false
+    tracer.Material   = Enum.Material.Neon
+    tracer.Size       = Vector3.new(0.05, 0.05, (origin - hitPoint).Magnitude)
+    tracer.CFrame     = CFrame.lookAt(origin, hitPoint) * CFrame.new(0, 0, -tracer.Size.Z / 2)
+    tracer.Parent     = Workspace
+
+    local style = Config.BulletTracers.Style
+    if style == "Rainbow" then
+        task.spawn(function()
+            local t = 0
+            while tracer and tracer.Parent do
+                tracer.Color = Color3.fromHSV((t * 0.05) % 1, 1, 1)
+                t = t + 1
+                task.wait()
+            end
+        end)
+    elseif style == "Lightning" then
+        tracer.Color = Color3.fromRGB(100, 150, 255)
+    else
+        tracer.Color = Config.BulletTracers.Color
+    end
+
+    if Config.BulletTracers.Fade then
+        local tween = TweenService:Create(
+            tracer,
+            TweenInfo.new(Config.BulletTracers.Duration, Enum.EasingStyle.Linear),
+            { Transparency = 1, Size = Vector3.new(0, 0, tracer.Size.Z) }
+        )
+        tween:Play()
+        tween.Completed:Connect(function() tracer:Destroy() end)
+    else
+        Debris:AddItem(tracer, Config.BulletTracers.Duration)
+    end
+end
+
+-- ==================== HITBOX ====================
+local OriginalSizes = {}
+
+local function ResetAllHitboxes()
+    for player, data in pairs(OriginalSizes) do
+        if player and player.Character then
+            for partName, size in pairs(data) do
+                local part = player.Character:FindFirstChild(partName)
+                if part then part.Size = size end
+            end
+        end
+    end
+    table.clear(OriginalSizes)
+end
+
+local function UpdateHitboxExpander()
+    if not Config.Hitbox.Enabled then
+        ResetAllHitboxes()
+        return
+    end
+    for _, player in ipairs(CachedPlayers) do
+        if not player.Character then continue end
+        local partName = Config.Hitbox.Mode == "Rage" and "HumanoidRootPart" or Config.Hitbox.TargetPart
+        local part     = player.Character:FindFirstChild(partName)
+        if not part then continue end
+        if not OriginalSizes[player] then OriginalSizes[player] = {} end
+        if not OriginalSizes[player][partName] then
+            OriginalSizes[player][partName] = part.Size
+        end
+        local newSize = Config.Hitbox.Mode == "Rage" and Config.Hitbox.RageSize or Config.Hitbox.LegitSize
+        part.Size         = Vector3.new(newSize, newSize, newSize)
+        part.Transparency = Config.Hitbox.ShowVisual and 0.5 or 1
+        part.CanCollide   = false
+    end
+end
+
+-- ==================== SILENT AIM ====================
+local ValidTargetParts = {"Head","HumanoidRootPart","UpperTorso","LowerTorso","Torso"}
+
+local function GetClosestPlayerForSilent()
+    if not Config.SilentAimEnabled then return nil end
+    local closest  = nil
+    local bestDist = Config.SilentAimFOV
+    local mouseLoc = GetMouseLocation()
+
+    for _, player in ipairs(CachedPlayers) do
+        if Config.TeamCheck and player.Team == LocalPlayer.Team then continue end
+        if Config.Whitelist[player.Name] then continue end
+        local char = player.Character
+        if not char then continue end
+        local hum  = FindFirstChild(char, "Humanoid")
+        local root = FindFirstChild(char, "HumanoidRootPart")
+        if not hum or not root or hum.Health <= 0 then continue end
+        if Config.VisibleCheck and not IsPlayerVisible(player) then continue end
+
+        local screenPos, onScreen = WorldToViewportPoint(root.Position)
+        if not onScreen then continue end
+
+        local dist = (mouseLoc - Vector2.new(screenPos.X, screenPos.Y)).Magnitude
+        if dist <= bestDist then
+            local targetPartName = Config.SilentAimTargetPart
+            if targetPartName == "Random" then
+                targetPartName = ValidTargetParts[math.random(1, #ValidTargetParts)]
+            end
+            closest          = FindFirstChild(char, targetPartName) or root
+            bestDist         = dist
+            LastTargetPlayer = player
+        end
+    end
+    return closest
+end
+
+-- ==================== SILENT AIM HOOKS ====================
+local OriginalFunctions = {}
+local HooksApplied      = false
+
+local hookfunc = hookfunction or replaceclosure or detour_function
+local hookmeta = hookmetamethod or function(obj, meta, hook)
+    local mt = getrawmetatable(obj)
+    setreadonly(mt, false)
+    local old = mt[meta]
+    mt[meta] = hook
+    setreadonly(mt, true)
+    return old
+end
+
+local function HookedNamecall(self, ...)
+    if checkcaller() then return OriginalFunctions.Namecall(self, ...) end
+    local method = getnamecallmethod()
+    local args   = {...}
+    if Config.SilentAimEnabled and CachedSilentTarget and CalculateChance(Config.SilentAimHitChance) then
+        if self == Workspace and method == "Raycast" and Config.SilentAimMethod == "Raycast" then
+            if args[1] and typeof(args[1]) == "Vector3" then
+                args[2] = getDirection(args[1], CachedSilentTarget.Position)
+                return OriginalFunctions.Namecall(self, table.unpack(args))
+            end
+        end
+    end
+    return OriginalFunctions.Namecall(self, ...)
+end
+
+local function HookedIndex(self, index)
+    if checkcaller() then return OriginalFunctions.Index(self, index) end
+    if Config.SilentAimEnabled and self == Mouse and CachedSilentTarget then
+        if Config.SilentAimMethod == "Mouse.Hit/Target" then
+            if index == "Target" or index == "target" then
+                return CachedSilentTarget
+            elseif index == "Hit" or index == "hit" then
+                if Config.MouseHitPrediction then
+                    return CachedSilentTarget.CFrame
+                        + (CachedSilentTarget.Velocity * Config.MouseHitPredictionAmount)
+                end
+                return CachedSilentTarget.CFrame
+            end
+        end
+    end
+    return OriginalFunctions.Index(self, index)
+end
+
+local function ApplySilentAimHooks()
+    if HooksApplied then return end
+    HooksApplied = true
+    OriginalFunctions.Namecall = hookmeta(game, "__namecall", newcclosure(HookedNamecall))
+    OriginalFunctions.Index    = hookmeta(game, "__index",    newcclosure(HookedIndex))
+end
+
+local function RemoveSilentAimHooks()
+    if not HooksApplied then return end
+    HooksApplied = false
+    if OriginalFunctions.Namecall then
+        hookmeta(game, "__namecall", OriginalFunctions.Namecall)
+    end
+    if OriginalFunctions.Index then
+        hookmeta(game, "__index", OriginalFunctions.Index)
+    end
+    table.clear(OriginalFunctions)
+end
+
+-- ==================== HIT LOG ПОТОК ====================
+task.spawn(function()
+    while task.wait(0.1) do
+        if not Config.HitLog.Enabled then continue end
+        local myChar = LocalPlayer.Character
+        local myRoot = myChar and FindFirstChild(myChar, "HumanoidRootPart")
+
+        for _, player in ipairs(CachedPlayers) do
+            if not player.Character then continue end
+            local hum  = player.Character:FindFirstChildOfClass("Humanoid")
+            local root = FindFirstChild(player.Character, "HumanoidRootPart")
+            if not hum or not root or not myRoot then continue end
+
+            local cur  = hum.Health
+            local prev = EnemyHealthCache[player]
+            EnemyHealthCache[player] = cur
+
+            if hum.Health <= 0 then
+                EnemyHealthCache[player] = nil
+                continue
+            end
+
+            if prev and cur < prev then
+                local damage          = prev - cur
+                local isMyHit         = false
+                local hitPartInstance = root
+                local hitPartName     = "Body"
+
+                if CachedSilentTarget and CachedSilentTarget.Parent == player.Character then
+                    isMyHit         = true
+                    hitPartInstance = CachedSilentTarget
+                    hitPartName     = CachedSilentTarget.Name
+                elseif Mouse.Target and Mouse.Target.Parent == player.Character then
+                    isMyHit         = true
+                    hitPartInstance = Mouse.Target
+                    hitPartName     = Mouse.Target.Name
+                end
+
+                if isMyHit then
+                    local distance = (myRoot.Position - root.Position).Magnitude
+                    local isHS     = hitPartName == "Head"
+                    AddToHitLog(player, hitPartName, damage, distance)
+                    ShowDamageIndicator(root.Position, damage, isHS)
+                    PlayHitSound(isHS)
+
+                    if Config.BulletTracers.Enabled then
+                        local char   = LocalPlayer.Character
+                        local tool   = char and char:FindFirstChildOfClass("Tool")
+                        local origin = tool and (tool:FindFirstChild("Handle") or tool:FindFirstChild("Muzzle"))
+                                    or (char and FindFirstChild(char, "RightHand"))
+                                    or (char and FindFirstChild(char, "Head"))
+                        if origin then
+                            CreateBulletTracer(origin.Position, hitPartInstance.Position)
+                        end
+                    end
+                end
+            end
+        end
+    end
+end)
+
+-- ==================== ANTI-AIM ====================
+local JitterAngle = 0
+
+task.spawn(function()
+    while task.wait(0.05) do
+        local char = LocalPlayer.Character
+        local root = char and FindFirstChild(char, "HumanoidRootPart")
+        if not root then continue end
+
+        if Config.AntiAim.Enabled then
+            if Config.AntiAim.Mode == "Spin" then
+                if not SpinVelocity or not SpinVelocity.Parent then
+                    if SpinVelocity then pcall(function() SpinVelocity:Destroy() end) end
+                    SpinVelocity = Instance.new("BodyAngularVelocity")
+                    SpinVelocity.MaxTorque       = Vector3.new(0, math.huge, 0)
+                    SpinVelocity.AngularVelocity = Vector3.new(0, 25, 0)
+                    SpinVelocity.P               = 1e4
+                    SpinVelocity.Parent          = root
+                end
+            elseif Config.AntiAim.Mode == "Jitter" then
+                if SpinVelocity then pcall(function() SpinVelocity:Destroy() end); SpinVelocity = nil end
+                JitterAngle = JitterAngle + 1
+                root.CFrame = CFrame.new(root.Position)
+                    * CFrame.Angles(0, math.rad((JitterAngle % 2 == 0) and 90 or -90), 0)
+            elseif Config.AntiAim.Mode == "Static" then
+                if SpinVelocity then pcall(function() SpinVelocity:Destroy() end); SpinVelocity = nil end
+                root.CFrame = CFrame.new(root.Position) * CFrame.Angles(0, math.rad(180), 0)
+            end
+        else
+            if SpinVelocity then pcall(function() SpinVelocity:Destroy() end); SpinVelocity = nil end
+        end
+    end
+end)
+
+-- ==================== NOCLIP ====================
+RunService.Stepped:Connect(function()
+    if not Config.NoClip then return end
+    for _, part in ipairs(NoClipParts) do
+        if part and part.Parent then
+            part.CanCollide = false
+        end
+    end
+end)
+
+-- ==================== ДВИЖЕНИЕ ====================
+RunService.Heartbeat:Connect(function(dt)
+    local char = LocalPlayer.Character
+    local root = char and FindFirstChild(char, "HumanoidRootPart")
+    local hum  = char and char:FindFirstChildOfClass("Humanoid")
+    if not root or not hum then return end
+
+    Workspace.Gravity = Config.Gravity and Config.GravityValue or OriginalGravity
+
+    if Config.SpeedWalk then
+        hum.WalkSpeed = Config.SpeedWalkValue
+    end
+
+    if Config.JumpPower then
+        hum.UseJumpPower = true
+        hum.JumpPower    = Config.JumpPowerValue
+    end
+
+    if Config.SpeedCFrame and hum.MoveDirection.Magnitude > 0 then
+        root.CFrame = root.CFrame + (hum.MoveDirection * (Config.SpeedCFrameValue / 100))
+    end
+
+    if Config.Spider and not Config.Fly then
+        if hum.MoveDirection.Magnitude > 0 then
+            local params = RaycastParams.new()
+            params.FilterDescendantsInstances = {char}
+            params.FilterType = Enum.RaycastFilterType.Exclude
+            local ray = Workspace:Raycast(root.Position, hum.MoveDirection * 2.5, params)
+            if ray and math.abs(ray.Normal.Y) < 0.1 then
+                root.AssemblyLinearVelocity = Vector3.new(
+                    root.AssemblyLinearVelocity.X, 45,
+                    root.AssemblyLinearVelocity.Z
+                )
+            end
+        end
+    end
+
+    if Config.AntiFling then
+        for _, player in ipairs(CachedPlayers) do
+            if player.Character then
+                for _, part in ipairs(player.Character:GetChildren()) do
+                    if part:IsA("BasePart") then
+                        part.CanCollide              = false
+                        part.AssemblyLinearVelocity  = Vector3.new(0, 0, 0)
+                        part.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+                    end
+                end
+            end
+        end
+    end
+end)
+
+-- ==================== ПОЛЁТ (BodyVelocity) ====================
+-- Используем BodyVelocity + BodyGyro для стабильного плавного полёта.
+-- BodyVelocity задаёт скорость в направлении камеры,
+-- BodyGyro фиксирует персонажа вертикально (без опрокидывания).
+
+local FlyBodyVelocity = nil
+local FlyBodyGyro     = nil
+local WasFlying       = false
+
+local function CreateFlyObjects(root)
+    -- BodyVelocity
+    if FlyBodyVelocity then pcall(function() FlyBodyVelocity:Destroy() end) end
+    FlyBodyVelocity           = Instance.new("BodyVelocity")
+    FlyBodyVelocity.MaxForce  = Vector3.new(1e5, 1e5, 1e5)
+    FlyBodyVelocity.Velocity  = Vector3.new(0, 0, 0)
+    FlyBodyVelocity.P         = 1e4
+    FlyBodyVelocity.Parent    = root
+
+    -- BodyGyro — держит персонажа прямо
+    if FlyBodyGyro then pcall(function() FlyBodyGyro:Destroy() end) end
+    FlyBodyGyro              = Instance.new("BodyGyro")
+    FlyBodyGyro.MaxTorque    = Vector3.new(1e5, 1e5, 1e5)
+    FlyBodyGyro.P            = 1e4
+    FlyBodyGyro.D            = 100
+    FlyBodyGyro.CFrame       = root.CFrame
+    FlyBodyGyro.Parent       = root
+end
+
+local function DestroyFlyObjects()
+    if FlyBodyVelocity then
+        pcall(function() FlyBodyVelocity:Destroy() end)
+        FlyBodyVelocity = nil
+    end
+    if FlyBodyGyro then
+        pcall(function() FlyBodyGyro:Destroy() end)
+        FlyBodyGyro = nil
+    end
+end
+
+RunService.RenderStepped:Connect(function()
+    local char = LocalPlayer.Character
+    local root = char and FindFirstChild(char, "HumanoidRootPart")
+    local hum  = char and char:FindFirstChildOfClass("Humanoid")
+    if not root or not hum then return end
+
+    if Config.Fly then
+        WasFlying = true
+        hum.PlatformStand = true
+
+        -- Создаём объекты если ещё нет или были уничтожены
+        if not FlyBodyVelocity or not FlyBodyVelocity.Parent then
+            CreateFlyObjects(root)
+        end
+
+        -- Считаем направление из нажатых клавиш относительно камеры
+        local camCF = Camera.CFrame
+        local dir   = Vector3.new(0, 0, 0)
+
+        if UserInputService:IsKeyDown(Enum.KeyCode.W)         then dir = dir + camCF.LookVector  end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S)         then dir = dir - camCF.LookVector  end
+        if UserInputService:IsKeyDown(Enum.KeyCode.A)         then dir = dir - camCF.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D)         then dir = dir + camCF.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.Space)     then dir = dir + Vector3.new(0, 1, 0) end
+        if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then dir = dir - Vector3.new(0, 1, 0) end
+
+        -- Плавное замедление при отпускании кнопок
+        if dir.Magnitude > 0 then
+            FlyBodyVelocity.Velocity = dir.Unit * Config.FlySpeed
+        else
+            FlyBodyVelocity.Velocity = FlyBodyVelocity.Velocity * 0.8
+            if FlyBodyVelocity.Velocity.Magnitude < 0.5 then
+                FlyBodyVelocity.Velocity = Vector3.new(0, 0, 0)
+            end
+        end
+
+        -- Держим гиро по оси камеры (без горизонтального крена)
+        FlyBodyGyro.CFrame = CFrame.new(Vector3.new(), camCF.LookVector)
+                           * CFrame.Angles(0, 0, 0)
+
+    else
+        if WasFlying then
+            WasFlying = false
+            DestroyFlyObjects()
+            task.defer(function()
+                local c = LocalPlayer.Character
+                local h = c and c:FindFirstChildOfClass("Humanoid")
+                if h then h.PlatformStand = false end
+            end)
+        end
+    end
+end)
+
+-- Чистим fly-объекты при respawn
+LocalPlayer.CharacterAdded:Connect(function()
+    WasFlying = false
+    FlyBodyVelocity = nil
+    FlyBodyGyro     = nil
+end)
+
+-- ==================== INFINITE JUMP ====================
+JumpConnection = UserInputService.JumpRequest:Connect(function()
+    if not Config.InfiniteJump then return end
+    local char = LocalPlayer.Character
+    local hum  = char and char:FindFirstChildOfClass("Humanoid")
+    if hum then hum:ChangeState(Enum.HumanoidStateType.Jumping) end
+end)
+
+-- ==================== TRIGGERBOT ====================
+task.spawn(function()
+    while true do
+        task.wait(math.max(Config.Triggerbot.Delay or 0.02, 0.01))
+        if not Config.Triggerbot.Enabled then continue end
+
+        local targetPart = (Config.SilentAimEnabled and CachedSilentTarget) or Mouse.Target
+        if not targetPart or not targetPart:IsA("BasePart") then continue end
+
+        local character = targetPart.Parent
+        if not character then continue end
+        if character:IsA("Accessory") or character:IsA("Tool") then
+            character = character.Parent
+        end
+        if not character then continue end
+
+        local player   = Players:GetPlayerFromCharacter(character)
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
+        if not player or player == LocalPlayer then continue end
+        if not humanoid or humanoid.Health <= 0 then continue end
+        if Config.TeamCheck and player.Team == LocalPlayer.Team then continue end
+
+        local tool = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
+        if tool then tool:Activate() end
+
+        if mouse1click then
+            mouse1click()
+        elseif mouse1press and mouse1release then
+            mouse1press()
+            task.wait(0.01)
+            mouse1release()
+        end
+    end
+end)
+
+-- ==================== MOUSE AIMBOT ====================
+local AimBotFOVCircle = Drawing.new("Circle")
+AimBotFOVCircle.Thickness    = 1
+AimBotFOVCircle.NumSides     = 100
+AimBotFOVCircle.Radius       = 50
+AimBotFOVCircle.Filled       = false
+AimBotFOVCircle.Visible      = false
+AimBotFOVCircle.ZIndex       = 999
+AimBotFOVCircle.Transparency = 1
+AimBotFOVCircle.Color        = Color3.fromRGB(255, 100, 0)
+
+RunService.RenderStepped:Connect(function()
+    local mouseLoc = GetMouseLocation()
+    if Config.AimBot and Config.AimBotShowFOV then
+        AimBotFOVCircle.Position = mouseLoc
+        AimBotFOVCircle.Radius   = Config.AimBotFOV
+        AimBotFOVCircle.Visible  = true
+    else
+        AimBotFOVCircle.Visible = false
+    end
+
+    if not Config.AimBot then return end
+    if not UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then return end
+
+    local bestDist = Config.AimBotFOV
+    local target   = nil
+
+    for _, player in ipairs(CachedPlayers) do
+        if Config.TeamCheck and player.Team == LocalPlayer.Team then continue end
+        if Config.Whitelist[player.Name] then continue end
+        local char = player.Character
+        if not char then continue end
+        local hum  = FindFirstChild(char, "Humanoid")
+        if not hum or hum.Health <= 0 then continue end
+        local part = FindFirstChild(char, Config.AimBotPart)
+                  or FindFirstChild(char, "HumanoidRootPart")
+        if not part then continue end
+        local sp, onScreen = WorldToViewportPoint(part.Position)
+        if not onScreen then continue end
+        local dist = (mouseLoc - Vector2.new(sp.X, sp.Y)).Magnitude
+        if dist < bestDist then
+            bestDist = dist
+            target   = part
+        end
+    end
+
+    if not target then return end
+    local sp, onScreen = WorldToViewportPoint(target.Position)
+    if not onScreen then return end
+    local smooth = math.max(Config.AimBotSmooth, 1)
+    safeMouseMoveRel(
+        (sp.X - mouseLoc.X) / smooth,
+        (sp.Y - mouseLoc.Y) / smooth
+    )
+end)
+
+-- ==================== DRAWING ЭЛЕМЕНТЫ ====================
+local FOVCircle = Drawing.new("Circle")
+FOVCircle.Thickness    = 1
+FOVCircle.NumSides     = 100
+FOVCircle.Radius       = 130
+FOVCircle.Filled       = false
+FOVCircle.Visible      = false
+FOVCircle.ZIndex       = 999
+FOVCircle.Transparency = 1
+FOVCircle.Color        = Color3.fromRGB(54, 57, 241)
+
+local SilentAimTracer = Drawing.new("Line")
+SilentAimTracer.Visible      = false
+SilentAimTracer.Color        = Color3.fromRGB(54, 57, 241)
+SilentAimTracer.Thickness    = 1.5
+SilentAimTracer.Transparency = 1
+
+local CrosshairLines = {
+    Top    = Drawing.new("Line"),
+    Bottom = Drawing.new("Line"),
+    Left   = Drawing.new("Line"),
+    Right  = Drawing.new("Line"),
+}
+local CrosshairAngle = 0
+
+-- ==================== ГЛАВНЫЙ RENDER ПОТОК ====================
+local frameCounter = 0
+local silentTick   = 0
+
+RunService.RenderStepped:Connect(function()
+    frameCounter = frameCounter + 1
+    local frame  = frameCounter
+
+    -- Лёгкие элементы — каждые 2 кадра
+    if frame % 2 ~= 0 then
+        pcall(function()
+            local center = GetMouseLocation()
+
+            if Config.Crosshair.Enabled then
+                if Config.Crosshair.Spin then
+                    CrosshairAngle = CrosshairAngle + math.rad(Config.Crosshair.SpinSpeed / 10)
+                else
+                    CrosshairAngle = 0
+                end
+                local s, g = Config.Crosshair.Size, Config.Crosshair.Gap
+                local pts = {
+                    Top    = {Vector2.new(0, -g), Vector2.new(0, -(g + s))},
+                    Bottom = {Vector2.new(0,  g), Vector2.new(0,  (g + s))},
+                    Left   = {Vector2.new(-g, 0), Vector2.new(-(g + s), 0)},
+                    Right  = {Vector2.new( g, 0), Vector2.new( (g + s), 0)},
+                }
+                local cos_a, sin_a = math.cos(CrosshairAngle), math.sin(CrosshairAngle)
+                for name, p in pairs(pts) do
+                    local line = CrosshairLines[name]
+                    local rot  = function(v)
+                        return Vector2.new(v.X * cos_a - v.Y * sin_a, v.X * sin_a + v.Y * cos_a)
+                    end
+                    line.From      = center + rot(p[1])
+                    line.To        = center + rot(p[2])
+                    line.Color     = Config.Crosshair.Color
+                    line.Thickness = Config.Crosshair.Thickness
+                    line.Visible   = true
+                end
+            else
+                for _, l in pairs(CrosshairLines) do l.Visible = false end
+            end
+
+            if Config.SilentAimEnabled and FOVCircle.Visible then
+                FOVCircle.Position = center
+                FOVCircle.Radius   = Config.SilentAimFOV
+            end
+
+            if Config.SilentAimEnabled and Config.ShowSilentAimTarget and CachedSilentTarget then
+                local tp, onScreen = WorldToViewportPoint(CachedSilentTarget.Position)
+                if onScreen then
+                    SilentAimTracer.From    = center
+                    SilentAimTracer.To      = Vector2.new(tp.X, tp.Y)
+                    SilentAimTracer.Visible = true
+                else
+                    SilentAimTracer.Visible = false
+                end
+            else
+                SilentAimTracer.Visible = false
+            end
+        end)
+        return
+    end
+
+    pcall(function()
+        -- Silent aim — раз в 6 кадров
+        silentTick = silentTick + 1
+        if silentTick % 6 == 0 then
+            if Config.SilentAimEnabled then
+                CachedSilentTarget = GetClosestPlayerForSilent()
+                if CachedSilentTarget and LastTargetPlayer then
+                    UpdateTargetHUD(LastTargetPlayer)
+                else
+                    HUD_Main.Visible = false
+                end
+            else
+                CachedSilentTarget = nil
+                HUD_Main.Visible   = false
+            end
+        end
+
+        -- Hitbox — раз в 3 кадра
+        if frame % 3 == 0 then
+            UpdateHitboxExpander()
+        end
+
+        if Config.CustomFOVEnabled then
+            Camera.FieldOfView = Config.CustomFOV
+        end
+
+        -- Cleanup кэша ESP — раз в 120 кадров
+        if frame % 120 == 0 then
+            for player, cache in pairs(ESPCache) do
+                if not Players:FindFirstChild(player.Name) then
+                    pcall(function() cache.NameTag:Remove() end)
+                    pcall(function() cache.Tracer:Remove()  end)
+                    pcall(function() cache.Arrow:Remove()   end)
+                    if cache.Bones    then for _, b in pairs(cache.Bones)    do pcall(function() b:Remove() end) end end
+                    if cache.BoxLines then for _, l in pairs(cache.BoxLines) do pcall(function() l:Remove() end) end end
+                    if cache.Highlight then pcall(function() cache.Highlight:Destroy() end) end
+                    ESPCache[player] = nil
+                end
+            end
+        end
+
+        if not Config.ESP.Enabled then
+            for _, cache in pairs(ESPCache) do
+                if cache.NameTag  then cache.NameTag.Visible  = false end
+                if cache.Tracer   then cache.Tracer.Visible   = false end
+                if cache.Arrow    then cache.Arrow.Visible     = false end
+                if cache.Bones    then for _, b in pairs(cache.Bones)    do b.Visible = false end end
+                if cache.BoxLines then for _, l in pairs(cache.BoxLines) do l.Visible = false end end
+            end
+            return
+        end
+
+        local center = GetMouseLocation()
+
+        for _, player in ipairs(CachedPlayers) do
+            local char = player.Character
+            local root = char and FindFirstChild(char, "HumanoidRootPart")
+            local hum  = char and FindFirstChild(char, "Humanoid")
+
+            if not root or not hum then
+                local cache = ESPCache[player]
+                if cache then
+                    if cache.NameTag  then cache.NameTag.Visible  = false end
+                    if cache.Tracer   then cache.Tracer.Visible   = false end
+                    if cache.Arrow    then cache.Arrow.Visible     = false end
+                    if cache.Bones    then for _, b in pairs(cache.Bones)    do b.Visible = false end end
+                    if cache.BoxLines then for _, l in pairs(cache.BoxLines) do l.Visible = false end end
+                end
+                continue
+            end
+
+            if not ESPCache[player] then
+                local entry = {
+                    NameTag  = Drawing.new("Text"),
+                    Tracer   = Drawing.new("Line"),
+                    Arrow    = Drawing.new("Triangle"),
+                    Bones    = {},
+                    BoxLines = {},
+                }
+                entry.NameTag.Center  = true
+                entry.NameTag.Outline = true
+                entry.NameTag.Size    = 13
+                entry.NameTag.Font    = 1
+                for i = 1, 10 do entry.Bones[i]    = Drawing.new("Line") end
+                for i = 1, 24 do entry.BoxLines[i] = Drawing.new("Line") end
+                ESPCache[player] = entry
+            end
+
+            local cache = ESPCache[player]
+            local rootPos, rootOnScreen = WorldToViewportPoint(root.Position)
+
+            cache.Arrow.Visible = false
+            for _, b in pairs(cache.Bones)    do b.Visible = false end
+            for _, l in pairs(cache.BoxLines) do l.Visible = false end
+
+            -- Chams и MechChams — раз в 4 кадра (не нужно каждый кадр)
+            if frame % 4 == 0 then
+                if Config.ESP.ChamsEnabled then
+                    if Config.ESP.ChamsStyle == "Highlight" then
+                        RestoreForceFieldMaterials(char)
+                        local hl = char:FindFirstChildOfClass("Highlight")
+                        if not hl then
+                            hl = Instance.new("Highlight", char)
+                        end
+                        hl.Enabled          = true
+                        hl.FillColor        = (Config.ESP.VisibleCheck and IsPlayerVisible(player))
+                                              and Config.ESP.VisibleColor
+                                              or  Config.ESP.ChamsFillColor
+                        hl.OutlineColor     = Color3.fromRGB(0, 0, 0)
+                        hl.FillTransparency = 0.5
+                        cache.Highlight     = hl
+                    elseif Config.ESP.ChamsStyle == "ForceField" then
+                        local hl = char:FindFirstChildOfClass("Highlight")
+                        if hl then hl:Destroy(); cache.Highlight = nil end
+                        if not OriginalPartMaterials[char] then
+                            SaveOriginalMaterials(char)
+                        end
+                        local col = (Config.ESP.VisibleCheck and IsPlayerVisible(player))
+                                    and Config.ESP.VisibleColor
+                                    or  Config.ESP.ChamsFillColor
+                        for _, part in ipairs(char:GetDescendants()) do
+                            if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+                                pcall(function()
+                                    part.Material = Enum.Material.ForceField
+                                    part.Color    = col
+                                end)
+                            end
+                        end
+                    end
+                else
+                    local hl = char:FindFirstChildOfClass("Highlight")
+                    if hl then hl:Destroy(); cache.Highlight = nil end
+                    RestoreForceFieldMaterials(char)
+                end
+
+                if Config.ESP.MechChams then
+                    for _, part in ipairs(char:GetChildren()) do
+                        if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+                            local adorn = FindFirstChild(part, "LunarMechAdornment")
+                            if not adorn then
+                                adorn = Instance.new("BoxHandleAdornment")
+                                adorn.Name        = "LunarMechAdornment"
+                                adorn.Adornee     = part
+                                adorn.AlwaysOnTop = true
+                                adorn.ZIndex      = 5
+                                adorn.Parent      = part
+                            end
+                            adorn.Size         = part.Size
+                            adorn.Color3       = Config.ESP.MechColor
+                            adorn.Transparency = 0.5
+                            adorn.Visible      = true
+                        end
+                    end
+                else
+                    RemoveMechChamsFromChar(char)
+                end
+            end
+
+            if Config.ESP.Arrows and not rootOnScreen then
+                local dir   = (root.Position - Camera.CFrame.Position).Unit
+                local camFw = Camera.CFrame.LookVector
+                local angle = math.atan2(dir:Cross(camFw).Y, dir:Dot(camFw))
+                local arrowCenter = center + Vector2.new(math.sin(angle), math.cos(angle)) * 140
+                local d    = (arrowCenter - center).Unit
+                local side = Vector2.new(-d.Y, d.X)
+                cache.Arrow.PointA  = arrowCenter + d * 10
+                cache.Arrow.PointB  = arrowCenter - d * 10 + side * 7
+                cache.Arrow.PointC  = arrowCenter - d * 10 - side * 7
+                cache.Arrow.Color   = Config.ESP.ArrowColor
+                cache.Arrow.Filled  = true
+                cache.Arrow.Visible = true
+            end
+
+            if not rootOnScreen then
+                cache.NameTag.Visible = false
+                cache.Tracer.Visible  = false
+                continue
+            end
+
+            local topPos    = WorldToViewportPoint(root.Position + Vector3.new(0,  3,   0))
+            local bottomPos = WorldToViewportPoint(root.Position - Vector3.new(0,  3.5, 0))
+            local boxH      = math.abs(topPos.Y - bottomPos.Y)
+            local boxW      = boxH * 0.6
+            local bL = rootPos.X - boxW / 2
+            local bR = rootPos.X + boxW / 2
+            local bT = rootPos.Y - boxH / 2
+            local bB = rootPos.Y + boxH / 2
+
+            if Config.ESP.Names then
+                local myRoot = LocalPlayer.Character and FindFirstChild(LocalPlayer.Character, "HumanoidRootPart")
+                local dist   = myRoot and math.floor((myRoot.Position - root.Position).Magnitude) or 0
+                local rainbow = Color3.fromHSV((tick() * 0.3) % 1, 1, 1)
+                cache.NameTag.Position = Vector2.new(rootPos.X, bT - 15)
+                cache.NameTag.Text     = string.format(
+                    "%s [%dHP] [%dm]",
+                    player.Name,
+                    math.floor(hum.Health),
+                    dist
+                )
+                cache.NameTag.Color   = Config.ESP.RainbowESP and rainbow or Config.ESP.NameColor
+                cache.NameTag.Visible = true
+            else
+                cache.NameTag.Visible = false
+            end
+
+            if Config.ESP.Tracers then
+                local orig  = Config.ESP.TracerOrigin
+                local fromX = Camera.ViewportSize.X / 2
+                local fromY = orig == "Top Center" and 0 or Camera.ViewportSize.Y
+                cache.Tracer.From    = Vector2.new(fromX, fromY)
+                cache.Tracer.To      = Vector2.new(rootPos.X, rootPos.Y)
+                cache.Tracer.Color   = Config.ESP.TracerColor
+                cache.Tracer.Visible = true
+            else
+                cache.Tracer.Visible = false
+            end
+
+            if Config.ESP.BoxEnabled then
+                local col = Config.ESP.RainbowESP
+                    and Color3.fromHSV((tick() * 0.3) % 1, 1, 1)
+                    or  Config.ESP.ESPColor
+                local mode = Config.ESP.BoxMode
+
+                if mode == "2D Box" then
+                    local edges = {
+                        {Vector2.new(bL,bT), Vector2.new(bR,bT)},
+                        {Vector2.new(bR,bT), Vector2.new(bR,bB)},
+                        {Vector2.new(bR,bB), Vector2.new(bL,bB)},
+                        {Vector2.new(bL,bB), Vector2.new(bL,bT)},
+                    }
+                    for i, e in ipairs(edges) do
+                        cache.BoxLines[i].From    = e[1]
+                        cache.BoxLines[i].To      = e[2]
+                        cache.BoxLines[i].Color   = col
+                        cache.BoxLines[i].Visible = true
+                    end
+
+                elseif mode == "2D Corner" then
+                    local cl = boxW * 0.25
+                    local corners = {
+                        {Vector2.new(bL,bT), Vector2.new(bL+cl,bT)},
+                        {Vector2.new(bL,bT), Vector2.new(bL,bT+cl)},
+                        {Vector2.new(bR,bT), Vector2.new(bR-cl,bT)},
+                        {Vector2.new(bR,bT), Vector2.new(bR,bT+cl)},
+                        {Vector2.new(bL,bB), Vector2.new(bL+cl,bB)},
+                        {Vector2.new(bL,bB), Vector2.new(bL,bB-cl)},
+                        {Vector2.new(bR,bB), Vector2.new(bR-cl,bB)},
+                        {Vector2.new(bR,bB), Vector2.new(bR,bB-cl)},
+                    }
+                    for i, e in ipairs(corners) do
+                        cache.BoxLines[i].From    = e[1]
+                        cache.BoxLines[i].To      = e[2]
+                        cache.BoxLines[i].Color   = col
+                        cache.BoxLines[i].Visible = true
+                    end
+
+                elseif mode == "3D Box" or mode == "3D Corner" then
+                    -- 3D Box только раз в 3 кадра (8× WorldToViewportPoint)
+                    if frame % 3 == 0 then
+                        local ext = Vector3.new(2, 3, 1.5)
+                        local cf  = root.CFrame
+                        local vp  = function(v) return WorldToViewportPoint(v) end
+                        local p   = {}
+                        local signs = {
+                            {-1,1,-1},{1,1,-1},{1,-1,-1},{-1,-1,-1},
+                            {-1,1, 1},{1,1, 1},{1,-1, 1},{-1,-1, 1},
+                        }
+                        for i, s in ipairs(signs) do
+                            local v3 = (cf * CFrame.new(ext.X*s[1], ext.Y*s[2], ext.Z*s[3])).Position
+                            p[i] = Vector2.new(vp(v3).X, vp(v3).Y)
+                        end
+                        local conn = {
+                            {p[1],p[2]},{p[2],p[3]},{p[3],p[4]},{p[4],p[1]},
+                            {p[5],p[6]},{p[6],p[7]},{p[7],p[8]},{p[8],p[5]},
+                            {p[1],p[5]},{p[2],p[6]},{p[3],p[7]},{p[4],p[8]},
+                        }
+                        if mode == "3D Box" then
+                            for i, c in ipairs(conn) do
+                                cache.BoxLines[i].From    = c[1]
+                                cache.BoxLines[i].To      = c[2]
+                                cache.BoxLines[i].Color   = col
+                                cache.BoxLines[i].Visible = true
+                            end
+                        else
+                            local idx = 1
+                            for _, c in ipairs(conn) do
+                                local d = (c[2]-c[1]) * 0.2
+                                cache.BoxLines[idx].From    = c[1]
+                                cache.BoxLines[idx].To      = c[1]+d
+                                cache.BoxLines[idx].Color   = col
+                                cache.BoxLines[idx].Visible = true
+                                idx = idx + 1
+                                cache.BoxLines[idx].From    = c[2]
+                                cache.BoxLines[idx].To      = c[2]-d
+                                cache.BoxLines[idx].Color   = col
+                                cache.BoxLines[idx].Visible = true
+                                idx = idx + 1
+                            end
+                        end
+                    end
+                end
+            end
+
+            -- Скелет — раз в 2 кадра (10 WorldToViewportPoint вызовов)
+            if Config.ESP.Skeleton and frame % 2 == 0 then
+                local function drawBone(idx, part1, part2)
+                    if not part1 or not part2 then return end
+                    local w1, o1 = WorldToViewportPoint(part1.Position)
+                    local w2, o2 = WorldToViewportPoint(part2.Position)
+                    if o1 and o2 then
+                        cache.Bones[idx].From    = Vector2.new(w1.X, w1.Y)
+                        cache.Bones[idx].To      = Vector2.new(w2.X, w2.Y)
+                        cache.Bones[idx].Color   = Config.ESP.SkeletonColor
+                        cache.Bones[idx].Visible = true
+                    end
+                end
+                local r15 = char:FindFirstChild("UpperTorso") ~= nil
+                if r15 then
+                    drawBone(1,  char:FindFirstChild("Head"),          char:FindFirstChild("UpperTorso"))
+                    drawBone(2,  char:FindFirstChild("UpperTorso"),    char:FindFirstChild("LowerTorso"))
+                    drawBone(3,  char:FindFirstChild("UpperTorso"),    char:FindFirstChild("LeftUpperArm"))
+                    drawBone(4,  char:FindFirstChild("LeftUpperArm"),  char:FindFirstChild("LeftLowerArm"))
+                    drawBone(5,  char:FindFirstChild("UpperTorso"),    char:FindFirstChild("RightUpperArm"))
+                    drawBone(6,  char:FindFirstChild("RightUpperArm"), char:FindFirstChild("RightLowerArm"))
+                    drawBone(7,  char:FindFirstChild("LowerTorso"),    char:FindFirstChild("LeftUpperLeg"))
+                    drawBone(8,  char:FindFirstChild("LeftUpperLeg"),  char:FindFirstChild("LeftLowerLeg"))
+                    drawBone(9,  char:FindFirstChild("LowerTorso"),    char:FindFirstChild("RightUpperLeg"))
+                    drawBone(10, char:FindFirstChild("RightUpperLeg"), char:FindFirstChild("RightLowerLeg"))
+                else
+                    drawBone(1, char:FindFirstChild("Head"),  char:FindFirstChild("Torso"))
+                    drawBone(2, char:FindFirstChild("Torso"), char:FindFirstChild("Left Arm"))
+                    drawBone(3, char:FindFirstChild("Torso"), char:FindFirstChild("Right Arm"))
+                    drawBone(4, char:FindFirstChild("Torso"), char:FindFirstChild("Left Leg"))
+                    drawBone(5, char:FindFirstChild("Torso"), char:FindFirstChild("Right Leg"))
+                end
+            end
+        end
+    end)
+end)
+
+-- ==================== ОЧИСТКА ПАМЯТИ КАЖДЫЕ 30 СЕКУНД ====================
+local function CleanupGarbage()
+    local logs = HitLogFrame:GetChildren()
+    if #logs > 20 then
+        for i = 1, #logs - 20 do
+            if logs[i]:IsA("TextLabel") then
+                logs[i]:Destroy()
+            end
+        end
+    end
+    for _, obj in ipairs(Workspace:GetChildren()) do
+        if obj:IsA("Part") and obj.Anchored and obj.CanCollide == false and obj.Transparency > 0.9 then
+            pcall(obj.Destroy, obj)
+        end
+    end
+end
+
+task.spawn(function()
+    while true do
+        task.wait(30)
+        pcall(CleanupGarbage)
+    end
+end)
+
+-- ==================== ОЧИСТКА ESP ПРИ ВЫХОДЕ ====================
+Players.PlayerRemoving:Connect(function(player)
+    local cache = ESPCache[player]
+    if not cache then return end
+    pcall(function() cache.NameTag:Remove() end)
+    pcall(function() cache.Tracer:Remove()  end)
+    pcall(function() cache.Arrow:Remove()   end)
+    if cache.Bones    then for _, b in pairs(cache.Bones)    do pcall(function() b:Remove() end) end end
+    if cache.BoxLines then for _, l in pairs(cache.BoxLines) do pcall(function() l:Remove() end) end end
+    if cache.Highlight then pcall(function() cache.Highlight:Destroy() end) end
+    ESPCache[player] = nil
+    EnemyHealthCache[player] = nil
+end)
+
+-- ==================== GUI ====================
+local Window = Library:CreateWindow({
+    Title        = 'Lunar Hub',
+    Center       = true,
+    AutoShow     = true,
+    TabPadding   = 8,
+    MenuFadeTime = 0.2,
+})
+
+local Tabs = {
+    Player   = Window:AddTab('Player'),
+    Combat   = Window:AddTab('Combat'),
+    Visuals  = Window:AddTab('Visuals'),
+    Scripts  = Window:AddTab('Scripts'),
+    Settings = Window:AddTab('Settings'),
+}
+
+-- ============================
+-- TAB: PLAYER
+-- ============================
+local MovementGroup  = Tabs.Player:AddLeftGroupbox('Characteristics')
+local PositionsGroup = Tabs.Player:AddLeftGroupbox('Teleportation & Click-Hacks')
+local PlayersGroup   = Tabs.Player:AddLeftGroupbox('Player List')
+local FlyGroup       = Tabs.Player:AddRightGroupbox('Fly & Clip')
+local PhysicsGroup   = Tabs.Player:AddRightGroupbox('Environment')
+local FlingGroup     = Tabs.Player:AddRightGroupbox('Fling')
+
+MovementGroup:AddToggle('SpeedWalkToggle', {
+    Text     = 'WalkSpeed Boost',
+    Default  = false,
+    Tooltip  = 'Increases your walking speed',
+    Callback = function(v)
+        Config.SpeedWalk = v
+        if not v then
+            local char = LocalPlayer.Character
+            local hum  = char and char:FindFirstChild("Humanoid")
+            if hum then hum.WalkSpeed = 16 end
+        end
+    end,
+}):AddKeyPicker('SpeedWalkKey', {
+    Default         = 'None',
+    SyncToggleState = true,
+    Mode            = 'Toggle',
+    Text            = 'WalkSpeed Key',
+})
+
+MovementGroup:AddSlider('SpeedWalkSlider', {
+    Text     = 'WalkSpeed Value',
+    Default  = 50,
+    Min      = 16,
+    Max      = 200,
+    Rounding = 0,
+    Tooltip  = 'Target walk speed value',
+    Callback = function(v) Config.SpeedWalkValue = v end,
+})
+
+MovementGroup:AddToggle('CFrameSpeedToggle', {
+    Text     = 'CFrame Speed',
+    Default  = false,
+    Tooltip  = 'Teleport-based movement in camera direction',
+    Callback = function(v) Config.SpeedCFrame = v end,
+}):AddKeyPicker('CFrameSpeedKey', {
+    Default         = 'None',
+    SyncToggleState = true,
+    Mode            = 'Toggle',
+    Text            = 'CFrame Speed Toggle',
+})
+
+MovementGroup:AddSlider('CFrameSpeedSlider', {
+    Text     = 'CFrame Speed Value',
+    Default  = 60,
+    Min      = 20,
+    Max      = 300,
+    Rounding = 0,
+    Callback = function(v) Config.SpeedCFrameValue = v end,
+})
+
+MovementGroup:AddToggle('InfJumpToggle', {
+    Text     = 'Infinite Jump',
+    Default  = false,
+    Tooltip  = 'Jump in the air with no limit',
+    Callback = function(v) Config.InfiniteJump = v end,
+}):AddKeyPicker('InfJumpKey', {
+    Default         = 'None',
+    SyncToggleState = true,
+    Mode            = 'Toggle',
+    Text            = 'Infinite Jump Toggle',
+})
+
+MovementGroup:AddToggle('JumpPowerToggle', {
+    Text     = 'Modify Jump Power',
+    Default  = false,
+    Tooltip  = 'Changes jump height',
+    Callback = function(v)
+        Config.JumpPower = v
+        if not v then
+            local char = LocalPlayer.Character
+            local hum  = char and char:FindFirstChild("Humanoid")
+            if hum then hum.JumpPower = 50; hum.UseJumpPower = false end
+        end
+    end,
+}):AddKeyPicker('JumpPowerKey', {
+    Default         = 'None',
+    SyncToggleState = true,
+    Mode            = 'Toggle',
+    Text            = 'JumpPower Toggle',
+})
+
+MovementGroup:AddSlider('JumpPowerSlider', {
+    Text     = 'Jump Power Value',
+    Default  = 100,
+    Min      = 50,
+    Max      = 300,
+    Rounding = 0,
+    Tooltip  = 'Jump force value',
+    Callback = function(v) Config.JumpPowerValue = v end,
+})
+
+local TargetPosName = ""
+PositionsGroup:AddInput('PosNameInput', {
+    Text        = 'Position Name',
+    Default     = '',
+    Placeholder = 'Name...',
+    Callback    = function(v) TargetPosName = v end,
+})
+
+PositionsGroup:AddButton('Save Position', function()
+    if TargetPosName == "" then return end
+    local char = LocalPlayer.Character
+    local root = char and FindFirstChild(char, "HumanoidRootPart")
+    if root then
+        SavedPositions[TargetPosName] = root.CFrame
+        Library:Notify("Saved: " .. TargetPosName, 2)
+    end
+end)
+
+PositionsGroup:AddButton('Teleport to Saved', function()
+    local char = LocalPlayer.Character
+    local root = char and FindFirstChild(char, "HumanoidRootPart")
+    if root and SavedPositions[TargetPosName] then
+        root.CFrame = SavedPositions[TargetPosName]
+    else
+        Library:Notify("Position not found!", 3)
+    end
+end)
+
+PositionsGroup:AddToggle('ClickTP', {
+    Text     = 'Ctrl + LMB Teleport',
+    Default  = false,
+    Callback = function(v) Config.TeleportClick = v end,
+}):AddKeyPicker('ClickTPKey', {
+    Default         = 'None',
+    SyncToggleState = true,
+    Mode            = 'Toggle',
+    Text            = 'Ctrl+LMB TP',
+})
+
+PositionsGroup:AddToggle('ClickDel', {
+    Text     = 'Ctrl + LMB Delete Object',
+    Default  = false,
+    Callback = function(v) Config.DeleteClick = v end,
+}):AddKeyPicker('ClickDelKey', {
+    Default         = 'None',
+    SyncToggleState = true,
+    Mode            = 'Toggle',
+    Text            = 'Ctrl+LMB Destroy',
+})
+
+local PlayerDropdown = PlayersGroup:AddDropdown('SelectedPlayerDropdown', {
+    Values  = {},
+    Default = 1,
+    Multi   = false,
+    Text    = 'Select Player',
+    Tooltip = 'Select a player to interact with',
+})
+
+local function UpdatePlayerDropdown()
+    local names = {}
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            table.insert(names, player.Name)
+        end
+    end
+    if PlayerDropdown then
+        PlayerDropdown:SetValues(names)
+        if #names > 0 then PlayerDropdown:SetValue(names[1]) end
+    end
+end
+Players.PlayerAdded:Connect(UpdatePlayerDropdown)
+Players.PlayerRemoving:Connect(UpdatePlayerDropdown)
+UpdatePlayerDropdown()
+
+local function GetSelectedPlayer()
+    if Options and Options.SelectedPlayerDropdown then
+        local name = Options.SelectedPlayerDropdown.Value
+        return name and Players:FindFirstChild(name)
+    end
+end
+
+PlayersGroup:AddButton('Teleport to Player', function()
+    local tp   = GetSelectedPlayer()
+    local char = LocalPlayer.Character
+    local root = char and FindFirstChild(char, "HumanoidRootPart")
+    if tp and tp.Character and FindFirstChild(tp.Character, "HumanoidRootPart") and root then
+        root.CFrame = tp.Character.HumanoidRootPart.CFrame * CFrame.new(0, 0, 3)
+        Library:Notify("Teleported to " .. tp.Name, 2)
+    else
+        Library:Notify("Player not found or no character", 3)
+    end
+end)
+
+PlayersGroup:AddButton('Add to Whitelist', function()
+    local tp = GetSelectedPlayer()
+    if tp then
+        Config.Whitelist[tp.Name] = true
+        Library:Notify(tp.Name .. " added to whitelist", 2)
+    end
+end)
+
+PlayersGroup:AddButton('Remove from Whitelist', function()
+    local tp = GetSelectedPlayer()
+    if tp then
+        Config.Whitelist[tp.Name] = nil
+        Library:Notify(tp.Name .. " removed from whitelist", 2)
+    end
+end)
+
+FlyGroup:AddToggle('FlyToggle', {
+    Text     = 'Flight (BodyVelocity)',
+    Default  = false,
+    Tooltip  = 'Smooth fly via BodyVelocity. WASD + Space/Shift',
+    Callback = function(v)
+        Config.Fly = v
+        if not v then
+            -- Принудительная очистка при выключении через GUI
+            DestroyFlyObjects()
+            task.defer(function()
+                local c = LocalPlayer.Character
+                local h = c and c:FindFirstChildOfClass("Humanoid")
+                if h then h.PlatformStand = false end
+            end)
+        end
+    end,
+}):AddKeyPicker('FlyToggleKey', {
+    Default         = 'None',
+    SyncToggleState = true,
+    Mode            = 'Toggle',
+    Text            = 'Fly Toggle',
+})
+
+FlyGroup:AddSlider('FlySpeedSlider', {
+    Text     = 'Fly Speed',
+    Default  = 80,
+    Min      = 20,
+    Max      = 300,
+    Rounding = 0,
+    Tooltip  = 'Flight speed (studs/sec)',
+    Callback = function(v) Config.FlySpeed = v end,
+})
+
+FlyGroup:AddToggle('NoClipToggle', {
+    Text     = 'Noclip (Walk Through Walls)',
+    Default  = false,
+    Callback = function(v)
+        Config.NoClip = v
+        if not v and LocalPlayer.Character then
+            for _, part in ipairs(LocalPlayer.Character:GetDescendants()) do
+                if part:IsA("BasePart")
+                    and part.Name ~= "HumanoidRootPart"
+                    and not part:FindFirstAncestorOfClass("Accessory")
+                then
+                    part.CanCollide = true
+                end
+            end
+        end
+    end,
+}):AddKeyPicker('NoClipToggleKey', {
+    Default         = 'None',
+    SyncToggleState = true,
+    Mode            = 'Toggle',
+    Text            = 'Noclip Toggle',
+})
+
+FlyGroup:AddToggle('SpiderToggle', {
+    Text     = 'Spider Mode',
+    Default  = false,
+    Tooltip  = 'Walk on vertical walls',
+    Callback = function(v) Config.Spider = v end,
+}):AddKeyPicker('SpiderToggleKey', {
+    Default         = 'None',
+    SyncToggleState = true,
+    Mode            = 'Toggle',
+    Text            = 'Spider Toggle',
+})
+
+PhysicsGroup:AddToggle('GravityToggle', {
+    Text     = 'Modify Gravity',
+    Default  = false,
+    Callback = function(v)
+        Config.Gravity = v
+        Workspace.Gravity = v and Config.GravityValue or OriginalGravity
+    end,
+}):AddKeyPicker('GravityToggleKey', {
+    Default         = 'None',
+    SyncToggleState = true,
+    Mode            = 'Toggle',
+    Text            = 'Gravity Toggle',
+})
+
+PhysicsGroup:AddSlider('GravityValue', {
+    Text     = 'Gravity Value',
+    Default  = 196,
+    Min      = 0,
+    Max      = 400,
+    Rounding = 0,
+    Callback = function(v)
+        Config.GravityValue = v
+        if Config.Gravity then Workspace.Gravity = v end
+    end,
+})
+
+FlingGroup:AddToggle('AntiFlingToggle', {
+    Text     = 'Anti-Fling Protection',
+    Default  = false,
+    Callback = function(v) Config.AntiFling = v end,
+}):AddKeyPicker('AntiFlingKey', {
+    Default         = 'None',
+    SyncToggleState = true,
+    Mode            = 'Toggle',
+    Text            = 'Anti-Fling Toggle',
+})
+
+
+-- ============================
+-- TAB: COMBAT
+-- ============================
+local AimboxGroup    = Tabs.Combat:AddLeftGroupbox('Mouse Aimbot')
+local SilentAimGroup = Tabs.Combat:AddRightGroupbox('Silent Aim')
+local HitboxGroup    = Tabs.Combat:AddLeftGroupbox('Hitbox Expander')
+local MiscGroup      = Tabs.Combat:AddLeftGroupbox('Anti-Aim & Misc')
+local StatsGroup     = Tabs.Combat:AddRightGroupbox('Hit Log')
+local TriggerGroup   = Tabs.Combat:AddLeftGroupbox('Trigger Bot')
+
+AimboxGroup:AddToggle('AimMasterToggle', {
+    Text     = 'Mouse Aimbot',
+    Default  = false,
+    Tooltip  = 'Snaps mouse to the nearest enemy - hold RMB to activate',
+    Callback = function(v) Config.AimBot = v end,
+}):AddKeyPicker('AimBotMasterKey', {
+    Default         = 'None',
+    SyncToggleState = true,
+    Mode            = 'Toggle',
+    Text            = 'AimBot Toggle',
+})
+
+local AimMaster = AimboxGroup:AddDependencyBox()
+
+AimMaster:AddDropdown('AimPartDropdown', {
+    Values   = {'Head', 'HumanoidRootPart', 'UpperTorso', 'LowerTorso'},
+    Default  = 1,
+    Multi    = false,
+    Text     = 'Target Bone',
+    Tooltip  = 'Which body part to aim at',
+    Callback = function(v) Config.AimBotPart = v end,
+})
+
+AimMaster:AddSlider('AimFOV', {
+    Text     = 'FOV Radius',
+    Default  = 50,
+    Min      = 10,
+    Max      = 500,
+    Rounding = 0,
+    Tooltip  = 'Target acquisition radius in pixels',
+    Callback = function(v)
+        Config.AimBotFOV       = v
+        AimBotFOVCircle.Radius = v
+    end,
+})
+
+AimMaster:AddSlider('AimSmooth', {
+    Text     = 'Smoothness',
+    Default  = 5,
+    Min      = 1,
+    Max      = 30,
+    Rounding = 0,
+    Tooltip  = 'Higher value = slower/smoother tracking',
+    Callback = function(v) Config.AimBotSmooth = v end,
+})
+
+AimMaster:AddToggle('AimBotFOVToggle', {
+    Text     = 'Show FOV Circle',
+    Default  = false,
+    Tooltip  = 'Draws the aimbot FOV circle on screen',
+    Callback = function(v) Config.AimBotShowFOV = v end,
+}):AddColorPicker('AimBotFOVColor', {
+    Default  = Color3.fromRGB(255, 100, 0),
+    Callback = function(v) AimBotFOVCircle.Color = v end,
+})
+
+AimMaster:SetupDependencies({ { Toggles.AimMasterToggle, true } })
+
+SilentAimGroup:AddToggle('SilentMasterToggle', {
+    Text     = 'Silent Aim',
+    Default  = false,
+    Tooltip  = 'Silently redirects bullets to target',
+    Callback = function(v)
+        Config.SilentAimEnabled = v
+        if v then
+            ApplySilentAimHooks()
+            Library:Notify("Silent Aim: ON", 2)
+        else
+            RemoveSilentAimHooks()
+            Library:Notify("Silent Aim: OFF", 2)
+        end
+    end,
+}):AddKeyPicker('SilentAimKeybind', {
+    Default         = 'RightAlt',
+    SyncToggleState = true,
+    Mode            = 'Toggle',
+    Text            = 'Silent Aim Toggle',
+})
+
+local SilentMaster = SilentAimGroup:AddDependencyBox()
+
+SilentMaster:AddDropdown('SilentMethod', {
+    Values   = {'Raycast', 'Mouse.Hit/Target'},
+    Default  = 1,
+    Multi    = false,
+    Text     = 'Silent Aim Method',
+    Callback = function(v) Config.SilentAimMethod = v end,
+})
+
+SilentMaster:AddDropdown('SilentPart', {
+    Values   = {'Head', 'HumanoidRootPart', 'Random'},
+    Default  = 2,
+    Multi    = false,
+    Text     = 'Target Bone',
+    Callback = function(v) Config.SilentAimTargetPart = v end,
+})
+
+SilentMaster:AddSlider('SilentFOV', {
+    Text     = 'FOV Radius',
+    Default  = 130,
+    Min      = 0,
+    Max      = 800,
+    Rounding = 0,
+    Callback = function(v) Config.SilentAimFOV = v; FOVCircle.Radius = v end,
+})
+
+SilentMaster:AddToggle('SilentFOVVisible', {
+    Text     = 'Show FOV Circle',
+    Default  = false,
+    Callback = function(v) FOVCircle.Visible = v end,
+}):AddColorPicker('SilentFOVColor', {
+    Default  = Color3.fromRGB(54, 57, 241),
+    Callback = function(v) FOVCircle.Color = v end,
+})
+
+SilentMaster:AddToggle('SilentTargetVisible', {
+    Text     = 'Show Tracer Line',
+    Default  = false,
+    Callback = function(v) Config.ShowSilentAimTarget = v end,
+}):AddKeyPicker('TracerVisibleKey', {
+    Default         = 'None',
+    SyncToggleState = true,
+    Mode            = 'Toggle',
+    Text            = 'Silent Tracer',
+})
+
+SilentMaster:AddSlider('SilentHitChance', {
+    Text     = 'Hit Chance (%)',
+    Default  = 100,
+    Min      = 0,
+    Max      = 100,
+    Rounding = 0,
+    Callback = function(v) Config.SilentAimHitChance = v end,
+})
+
+SilentMaster:AddToggle('SilentPredictionToggle', {
+    Text     = 'Prediction',
+    Default  = false,
+    Callback = function(v) Config.MouseHitPrediction = v end,
+})
+
+SilentMaster:AddSlider('SilentPredictionAmount', {
+    Text     = 'Prediction Value',
+    Default  = 0.165,
+    Min      = 0.01,
+    Max      = 1,
+    Rounding = 3,
+    Callback = function(v) Config.MouseHitPredictionAmount = v end,
+})
+
+SilentMaster:AddToggle('SilentVisibleCheck', {
+    Text     = 'Wall Check (Visible Only)',
+    Default  = false,
+    Callback = function(v) Config.VisibleCheck = v end,
+})
+
+SilentMaster:AddToggle('TeamCheckToggle', {
+    Text     = 'Team Check',
+    Default  = false,
+    Callback = function(v) Config.TeamCheck = v end,
+})
+
+SilentMaster:AddToggle('HitSoundToggle', {
+    Text     = 'Hit Sounds',
+    Default  = false,
+    Callback = function(v) Config.HitSoundEnabled = v end,
+})
+
+SilentMaster:AddToggle('TargetHUDToggle', {
+    Text     = 'Show Target HUD',
+    Default  = false,
+    Callback = function(v) Config.TargetHUD.Enabled = v end,
+})
+
+SilentMaster:SetupDependencies({ { Toggles.SilentMasterToggle, true } })
+
+MiscGroup:AddToggle('AntiAimToggle', {
+    Text     = 'Anti-Aim',
+    Default  = false,
+    Tooltip  = 'Distorts your character angle to confuse enemies',
+    Callback = function(v) Config.AntiAim.Enabled = v end,
+}):AddKeyPicker('AntiAimKey', {
+    Default         = 'None',
+    SyncToggleState = true,
+    Mode            = 'Toggle',
+    Text            = 'Anti-Aim Toggle',
+})
+
+MiscGroup:AddDropdown('AntiAimMode', {
+    Text     = 'AA Mode',
+    Values   = {'Spin', 'Jitter', 'Static'},
+    Default  = 1,
+    Callback = function(v) Config.AntiAim.Mode = v end,
+})
+
+HitboxGroup:AddToggle('HitboxMasterToggle', {
+    Text     = 'Hitbox Expander',
+    Default  = false,
+    Callback = function(v) Config.Hitbox.Enabled = v end,
+}):AddColorPicker('HitboxColor', {
+    Default  = Color3.fromRGB(255, 0, 0),
+    Title    = 'Hitbox Color',
+    Callback = function(v) Config.Hitbox.Color = v end,
+})
+
+local HitboxMaster = HitboxGroup:AddDependencyBox()
+
+HitboxMaster:AddDropdown('HitboxMode', {
+    Text     = 'Hitbox Mode',
+    Values   = {'Legit', 'Rage'},
+    Default  = 1,
+    Multi    = false,
+    Callback = function(v) Config.Hitbox.Mode = v end,
+})
+
+HitboxMaster:AddSlider('LegitSizeSlider', {
+    Text     = 'Legit Size',
+    Default  = 4,
+    Min      = 0,
+    Max      = 6,
+    Rounding = 1,
+    Callback = function(v) Config.Hitbox.LegitSize = v end,
+})
+
+HitboxMaster:AddSlider('RageSizeSlider', {
+    Text     = 'Rage Size',
+    Default  = 15,
+    Min      = 5,
+    Max      = 30,
+    Rounding = 1,
+    Callback = function(v) Config.Hitbox.RageSize = v end,
+})
+
+HitboxMaster:AddDropdown('HitboxPart', {
+    Text     = 'Legit Target Part',
+    Values   = {'Head', 'HumanoidRootPart', 'UpperTorso'},
+    Default  = 1,
+    Callback = function(v) Config.Hitbox.TargetPart = v end,
+})
+
+HitboxMaster:AddToggle('HitboxVisual', {
+    Text     = 'Show Visual Box',
+    Default  = true,
+    Callback = function(v) Config.Hitbox.ShowVisual = v end,
+})
+
+HitboxMaster:SetupDependencies({ { Toggles.HitboxMasterToggle, true } })
+
+StatsGroup:AddToggle('HitLogToggle', {
+    Text     = 'Hit Log',
+    Default  = true,
+    Callback = function(v)
+        Config.HitLog.Enabled = v
+        HitLogFrame.Visible   = v
+    end,
+})
+
+StatsGroup:AddButton('Clear Screen Logs', function()
+    for _, child in ipairs(HitLogFrame:GetChildren()) do
+        if child:IsA("TextLabel") then child:Destroy() end
+    end
+end)
+
+TriggerGroup:AddToggle('Trigger', {
+    Text     = 'Triggerbot',
+    Default  = false,
+    Callback = function(v) Config.Triggerbot.Enabled = v end,
+}):AddKeyPicker('TriggerToggleKey', {
+    Default         = 'None',
+    SyncToggleState = true,
+    Mode            = 'Toggle',
+    Text            = 'Trigger Toggle',
+})
+
+TriggerGroup:AddSlider('TriggerbotDelay', {
+    Text     = 'Triggerbot Delay',
+    Min      = 0,
+    Max      = 500,
+    Default  = 20,
+    Rounding = 5,
+    Callback = function(v) Config.Triggerbot.Delay = v / 1000 end,
+})
+-- ============================
+-- TAB: VISUALS
+-- ============================
+local LightingGroup     = Tabs.Visuals:AddLeftGroupbox('Graphics & Lighting')
+local ShadersGroup      = Tabs.Visuals:AddLeftGroupbox('Shaders')
+local ESPGroup          = Tabs.Visuals:AddRightGroupbox('ESP (Wallhack)')
+local CrosshairGroup    = Tabs.Visuals:AddRightGroupbox('Custom Crosshair')
+local BulletTracerGroup = Tabs.Visuals:AddLeftGroupbox('Bullet Tracers')
+
+LightingGroup:AddToggle('FullbrightToggle', {
+    Text     = 'Fullbright',
+    Default  = false,
+    Callback = function(v)
+        Config.Fullbright = v
+        if v then
+            Lighting.Ambient        = Color3.fromRGB(255, 255, 255)
+            Lighting.OutdoorAmbient = Color3.fromRGB(255, 255, 255)
+            Lighting.Brightness     = 2
+        else
+            Lighting.Ambient        = OriginalLighting.Ambient
+            Lighting.OutdoorAmbient = OriginalLighting.OutdoorAmbient
+            Lighting.Brightness     = OriginalLighting.Brightness
+        end
+    end,
+}):AddKeyPicker('FullbrightToggleKey', {
+    Default         = 'None',
+    SyncToggleState = true,
+    Mode            = 'Toggle',
+    Text            = 'Fullbright Toggle',
+})
+
+LightingGroup:AddToggle('CustomFOVEnable', {
+    Text     = 'Modify Camera FOV',
+    Default  = false,
+    Callback = function(v)
+        Config.CustomFOVEnabled = v
+        if not v then Camera.FieldOfView = 70 end
+    end,
+})
+
+LightingGroup:AddSlider('CustomFOVSlider', {
+    Text     = 'FOV Value',
+    Default  = 70,
+    Min      = 30,
+    Max      = 120,
+    Rounding = 0,
+    Callback = function(v) Config.CustomFOV = v end,
+})
+
+LightingGroup:AddDropdown('SkyboxDropdown', {
+    Text     = 'Custom Skybox',
+    Values   = {'Default', 'Night', 'Space', 'Sunset'},
+    Default  = 1,
+    Callback = function(v) ApplySkybox(v) end,
+})
+
+ShadersGroup:AddDropdown('LunarShadersPreset', {
+    Text     = 'Shader Preset',
+    Values   = {'Default','Vibrant Retro','Cyber Midnight','Warm Sunset','Cinematic RT','Silent Hill','Deep Space','Acid Trip','Dreamy','Monochrome','RTX'},
+    Default  = 1,
+    Multi    = false,
+    Callback = function(Value)
+        for _, name in ipairs({"LunarColor","LunarBloom","LunarBlur","LunarSun"}) do
+            local e = Lighting:FindFirstChild(name)
+            if e then e:Destroy() end
+        end
+        Lighting.Ambient              = OriginalLighting.Ambient
+        Lighting.OutdoorAmbient       = OriginalLighting.OutdoorAmbient
+        Lighting.Brightness           = OriginalLighting.Brightness
+        Lighting.GlobalShadows        = OriginalLighting.GlobalShadows
+        Lighting.ExposureCompensation = OriginalLighting.ExposureCompensation
+        if not Config.NoFog then Lighting.FogEnd = OriginalLighting.FogEnd end
+
+        local function cc(b,c,s,t)
+            local e = Instance.new("ColorCorrectionEffect",Lighting); e.Name="LunarColor"
+            e.Brightness=b; e.Contrast=c; e.Saturation=s
+            if t then e.TintColor=t end
+        end
+        local function bloom(i,sz,th)
+            local e=Instance.new("BloomEffect",Lighting); e.Name="LunarBloom"
+            e.Intensity=i; e.Size=sz; e.Threshold=th
+        end
+
+        if     Value=="Vibrant Retro"  then cc(0.05,0.25,0.5); bloom(0.6,12,0.8)
+        elseif Value=="Cyber Midnight" then
+            Lighting.Ambient=Color3.fromRGB(15,15,35); Lighting.OutdoorAmbient=Color3.fromRGB(20,20,45); Lighting.Brightness=1.2
+            cc(-0.08,0.4,0.3,Color3.fromRGB(210,190,255)); bloom(1.2,24,0.2)
+        elseif Value=="Warm Sunset" then
+            Lighting.OutdoorAmbient=Color3.fromRGB(75,45,35)
+            cc(0.02,0.2,0.55,Color3.fromRGB(255,210,170))
+            local s=Instance.new("SunRaysEffect",Lighting); s.Name="LunarSun"; s.Intensity=0.25; s.Spread=0.85
+        elseif Value=="Cinematic RT" then
+            Lighting.GlobalShadows=true; Lighting.ExposureCompensation=0.15
+            cc(-0.02,0.35,0.15); bloom(0.4,8,0.95)
+        elseif Value=="Silent Hill" then
+            Lighting.Ambient=Color3.fromRGB(90,90,90); Lighting.OutdoorAmbient=Color3.fromRGB(110,110,110); Lighting.FogEnd=150
+            cc(0,-0.1,-0.7)
+        elseif Value=="Deep Space" then
+            Lighting.Ambient=Color3.fromRGB(0,0,0); Lighting.OutdoorAmbient=Color3.fromRGB(5,5,15); Lighting.Brightness=0
+            cc(0,0.4,0.1); bloom(2,35,0.05)
+        elseif Value=="Acid Trip" then
+            cc(0,0.6,2.5,Color3.fromRGB(255,100,255))
+            local b=Instance.new("BlurEffect",Lighting); b.Name="LunarBlur"; b.Size=5
+        elseif Value=="Dreamy" then
+            Lighting.Ambient=Color3.fromRGB(255,220,220); Lighting.OutdoorAmbient=Color3.fromRGB(255,230,230)
+            cc(0.1,0,-0.2); bloom(1,24,0.4)
+        elseif Value=="Monochrome" then cc(0,0.3,-1)
+        elseif Value=="RTX" then
+            Lighting.Brightness=1.5; Lighting.GlobalShadows=true
+            cc(0,0.3,0.2,Color3.fromRGB(240,245,255)); bloom(0.5,20,0.6)
+            local b=Instance.new("BlurEffect",Lighting); b.Name="LunarBlur"; b.Size=2
+        end
+    end,
+})
+
+ESPGroup:AddToggle('ESPMasterToggle', {
+    Text     = 'ESP System',
+    Default  = false,
+    Callback = function(v) Config.ESP.Enabled = v end,
+}):AddKeyPicker('ESPMasterToggleKey', {
+    Default         = 'None',
+    SyncToggleState = true,
+    Mode            = 'Toggle',
+    Text            = 'ESP Master Toggle',
+})
+
+local ESPMaster = ESPGroup:AddDependencyBox()
+
+ESPMaster:AddToggle('ESPNameToggle', {
+    Text     = 'Names, Distance & HP',
+    Default  = false,
+    Callback = function(v) Config.ESP.Names = v end,
+}):AddColorPicker('ESPNameColor', {
+    Default  = Color3.fromRGB(255, 255, 255),
+    Callback = function(v) Config.ESP.NameColor = v end,
+})
+
+ESPMaster:AddToggle('TracerMasterToggle', {
+    Text     = 'Tracers (Lines)',
+    Default  = false,
+    Callback = function(v) Config.ESP.Tracers = v end,
+}):AddColorPicker('ESPTracerColor', {
+    Default  = Color3.fromRGB(0, 255, 255),
+    Callback = function(v) Config.ESP.TracerColor = v end,
+})
+
+local TracerMaster = ESPMaster:AddDependencyBox()
+TracerMaster:AddDropdown('ESPTracerOriginDropdown', {
+    Values   = {'Top Center', 'Bottom Center'},
+    Default  = 2,
+    Multi    = false,
+    Text     = 'Tracer Origin',
+    Callback = function(v) Config.ESP.TracerOrigin = v end,
+})
+
+ESPMaster:AddToggle('ChamsMasterToggle', {
+    Text     = 'Chams (Highlight)',
+    Default  = false,
+    Callback = function(v)
+        Config.ESP.ChamsEnabled = v
+        if not v then
+            RemoveAllHighlights()
+            RemoveAllForceFields()
+        end
+    end,
+}):AddColorPicker('ESPChamColor', {
+    Default  = Color3.fromRGB(255, 0, 0),
+    Callback = function(v) Config.ESP.ChamsFillColor = v end,
+})
+
+local ChamsMaster = ESPMaster:AddDependencyBox()
+
+ChamsMaster:AddDropdown('ChamsStyleDropdown', {
+    Text     = 'Chams Style',
+    Values   = {'Highlight', 'ForceField'},
+    Default  = 1,
+    Callback = function(v)
+        if v == "Highlight" then RemoveAllForceFields()
+        elseif v == "ForceField" then RemoveAllHighlights() end
+        Config.ESP.ChamsStyle = v
+    end,
+})
+
+ChamsMaster:AddToggle('ESPMechChamsToggle', {
+    Text     = 'MechChams (per-part)',
+    Default  = false,
+    Callback = function(v)
+        Config.ESP.MechChams = v
+        if not v then RemoveAllMechChams() end
+    end,
+}):AddColorPicker('ESPMechColor', {
+    Default  = Color3.fromRGB(255, 255, 255),
+    Callback = function(v) Config.ESP.MechColor = v end,
+})
+
+ChamsMaster:AddToggle('ESPVisibleCheckToggle', {
+    Text     = 'Visible Color Check',
+    Default  = false,
+    Callback = function(v) Config.ESP.VisibleCheck = v end,
+}):AddColorPicker('VisibleColorPicker', {
+    Default  = Color3.fromRGB(0, 255, 0),
+    Callback = function(v) Config.ESP.VisibleColor = v end,
+})
+
+ESPMaster:AddToggle('ESPSkeleton', {
+    Text     = 'Show Skeleton ESP',
+    Default  = false,
+    Callback = function(v) Config.ESP.Skeleton = v end,
+}):AddColorPicker('ESPSkeletonColor', {
+    Default  = Color3.fromRGB(0, 255, 0),
+    Title    = 'Skeleton Color',
+    Callback = function(v) Config.ESP.SkeletonColor = v end,
+})
+
+ESPMaster:AddToggle('ESPArrows', {
+    Text     = 'Offscreen Arrows',
+    Default  = false,
+    Callback = function(v) Config.ESP.Arrows = v end,
+}):AddColorPicker('ESPArrowColor', {
+    Default  = Color3.fromRGB(255, 150, 0),
+    Title    = 'Arrow Color',
+    Callback = function(v) Config.ESP.ArrowColor = v end,
+})
+
+ESPMaster:AddToggle('BoxMasterToggle', {
+    Text     = 'Box ESP',
+    Default  = false,
+    Callback = function(v) Config.ESP.BoxEnabled = v end,
+}):AddColorPicker('ESPBoxColor', {
+    Default  = Color3.fromRGB(255, 255, 255),
+    Title    = 'Box Color',
+    Callback = function(v) Config.ESP.ESPColor = v end,
+})
+
+local BoxMaster = ESPMaster:AddDependencyBox()
+BoxMaster:AddDropdown('ESPBoxModeSelection', {
+    Values   = {'2D Box', '2D Corner', '3D Box', '3D Corner'},
+    Default  = 1,
+    Text     = 'Box Style',
+    Callback = function(v) Config.ESP.BoxMode = v end,
+})
+
+ESPMaster:AddToggle('RainbowESPToggle', {
+    Text     = 'Rainbow ESP',
+    Default  = false,
+    Callback = function(v) Config.ESP.RainbowESP = v end,
+})
+
+ESPMaster:SetupDependencies({ { Toggles.ESPMasterToggle, true } })
+BoxMaster:SetupDependencies({ { Toggles.BoxMasterToggle, true } })
+ChamsMaster:SetupDependencies({ { Toggles.ChamsMasterToggle, true } })
+TracerMaster:SetupDependencies({ { Toggles.TracerMasterToggle, true } })
+
+CrosshairGroup:AddToggle('CrosshairMasterToggle', {
+    Text     = 'Crosshair',
+    Default  = false,
+    Callback = function(v) Config.Crosshair.Enabled = v end,
+}):AddColorPicker('CrossColor', {
+    Default  = Color3.fromRGB(0, 255, 0),
+    Callback = function(v) Config.Crosshair.Color = v end,
+})
+
+CrosshairGroup:AddSlider('CrosshairSlider', {
+    Text     = 'Size',
+    Default  = 10,
+    Min      = 1,
+    Max      = 50,
+    Rounding = 0,
+    Callback = function(v) Config.Crosshair.Size = v end,
+})
+
+local CrosshairMaster = CrosshairGroup:AddDependencyBox()
+
+CrosshairMaster:AddSlider('CrossGap', {
+    Text     = 'Gap',
+    Default  = 5,
+    Min      = 0,
+    Max      = 30,
+    Rounding = 0,
+    Callback = function(v) Config.Crosshair.Gap = v end,
+})
+
+CrosshairMaster:AddSlider('CrossThick', {
+    Text     = 'Thickness',
+    Default  = 2,
+    Min      = 1,
+    Max      = 5,
+    Rounding = 0,
+    Callback = function(v) Config.Crosshair.Thickness = v end,
+})
+
+CrosshairMaster:AddToggle('CrossSpin', {
+    Text     = 'Spin Animation',
+    Default  = false,
+    Callback = function(v) Config.Crosshair.Spin = v end,
+})
+
+CrosshairMaster:AddSlider('CrossSpinSpeed', {
+    Text     = 'Spin Speed',
+    Default  = 100,
+    Min      = 10,
+    Max      = 500,
+    Rounding = 0,
+    Callback = function(v) Config.Crosshair.SpinSpeed = v end,
+})
+
+CrosshairMaster:SetupDependencies({ { Toggles.CrosshairMasterToggle, true } })
+
+BulletTracerGroup:AddToggle('BTracerToggle', {
+    Text     = 'Bullet Tracers',
+    Default  = false,
+    Callback = function(v) Config.BulletTracers.Enabled = v end,
+}):AddColorPicker('BTracerColor', {
+    Default  = Color3.fromRGB(255, 255, 0),
+    Callback = function(v) Config.BulletTracers.Color = v end,
+})
+
+BulletTracerGroup:AddSlider('BTracerDur', {
+    Text     = 'Tracer Duration',
+    Default  = 1,
+    Min      = 0.1,
+    Max      = 5,
+    Rounding = 1,
+    Callback = function(v) Config.BulletTracers.Duration = v end,
+})
+
+BulletTracerGroup:AddToggle('BTracerFade', {
+    Text     = 'Fade Animation',
+    Default  = true,
+    Callback = function(v) Config.BulletTracers.Fade = v end,
+})
+
+BulletTracerGroup:AddDropdown('BTracerStyle', {
+    Text     = 'Tracer Style',
+    Values   = {'Normal', 'Rainbow', 'Lightning'},
+    Default  = 1,
+    Callback = function(v) Config.BulletTracers.Style = v end,
+})
+
+-- ============================
+-- TAB: SCRIPTS
+-- ============================
+local RegistryLeft  = Tabs.Scripts:AddLeftGroupbox('External Software')
+local RegistryRight = Tabs.Scripts:AddRightGroupbox('Fishing (Only for RefineryCaves 2)')
+local FishingGroup  = RegistryRight
+
+_G.FishingLoaded  = _G.FishingLoaded  or false
+_G.WorldESPLoaded = _G.WorldESPLoaded or false
+
+local FishingToggle = FishingGroup:AddToggle('FishingToggle', {
+    Text     = 'Auto-Fishing',
+    Default  = false,
+    Visible  = true,
+    Callback = function(v)
+        if _G.FishingConfig then
+            _G.FishingConfig.Enabled = v
+            if _G.ToggleFishing then _G.ToggleFishing(v) end
+        else
+            _G.FishingConfig = { Enabled = v }
+        end
+    end,
+})
+
+local FishingWaitBite = FishingGroup:AddSlider('FishingWaitBite', {
+    Text     = 'Bite Wait Timeout (сек)',
+    Default  = 3, Min = 0, Max = 10, Rounding = 1, Visible = false,
+    Callback = function(v)
+        if not _G.FishingConfig then _G.FishingConfig = {} end
+        _G.FishingConfig.WaitBite = v
+    end,
+})
+
+local FishingReelDuration = FishingGroup:AddSlider('FishingReelDuration', {
+    Text     = 'Reel Duration (сек)',
+    Default  = 2, Min = 0, Max = 10, Rounding = 1, Visible = false,
+    Callback = function(v)
+        if not _G.FishingConfig then _G.FishingConfig = {} end
+        _G.FishingConfig.ReelDuration = v
+    end,
+})
+
+local FishingHitInterval = FishingGroup:AddSlider('FishingHitInterval', {
+    Text     = 'Click Interval (сек)',
+    Default  = 0.12, Min = 0.01, Max = 1, Rounding = 3, Visible = false,
+    Callback = function(v)
+        if not _G.FishingConfig then _G.FishingConfig = {} end
+        _G.FishingConfig.HitInterval = v
+    end,
+})
+
+local FishingResetDelay = FishingGroup:AddSlider('FishingResetDelay', {
+    Text     = 'Reset Delay (сек)',
+    Default  = 1, Min = 0, Max = 5, Rounding = 1, Visible = false,
+    Callback = function(v)
+        if not _G.FishingConfig then _G.FishingConfig = {} end
+        _G.FishingConfig.ResetDelay = v
+    end,
+})
+
+local FishingZoneDropdown = FishingGroup:AddDropdown('FishingZoneDropdown', {
+    Text     = 'Зона ловли',
+    Values   = {"По умолчанию"},
+    Default  = 1, Visible = false,
+    Callback = function(v)
+        if not _G.FishingConfig then _G.FishingConfig = {} end
+        _G.FishingConfig.SelectedZone = v
+    end,
+})
+
+local RefreshZonesButton = FishingGroup:AddButton({
+    Text    = 'Обновить список зон',
+    Visible = false,
+    Func    = function()
+        UpdateZoneList()
+        Library:Notify("Список зон обновлён", 2)
+    end
+})
+
+local function UpdateZoneList()
+    local list = {"По умолчанию"}
+    local fishZones = Workspace:FindFirstChild("MouseIgnore") and Workspace.MouseIgnore:FindFirstChild("FishZones")
+    if fishZones then
+        for _, zone in ipairs(fishZones:GetChildren()) do
+            if not table.find(list, zone.Name) then
+                table.insert(list, zone.Name)
+            end
+        end
+    end
+    if FishingZoneDropdown then
+        FishingZoneDropdown:SetValues(list)
+        local current = _G.FishingConfig and _G.FishingConfig.SelectedZone or "По умолчанию"
+        if not table.find(list, current) then
+            current = "По умолчанию"
+            if _G.FishingConfig then _G.FishingConfig.SelectedZone = current end
+        end
+        FishingZoneDropdown:SetValue(current)
+    end
+end
+
+task.wait(2)
+UpdateZoneList()
+
+task.spawn(function()
+    while true do
+        task.wait(10)
+        if Library.Unloaded then break end
+        if FishingZoneDropdown and FishingZoneDropdown.Visible then
+            UpdateZoneList()
+        end
+    end
+end)
+
+FishingGroup:AddButton({
+    Text = 'Load Fishing Script',
+    Func = function()
+        if _G.FishingLoaded then
+            Library:Notify('Скрипт фишинга уже загружен', 2)
+            return
+        end
+        RunRegisteredScript("Fishing")
+        _G.FishingLoaded = true
+        FishingToggle:SetVisible(true)
+        FishingWaitBite:SetVisible(true)
+        FishingReelDuration:SetVisible(true)
+        FishingHitInterval:SetVisible(true)
+        FishingResetDelay:SetVisible(true)
+        FishingZoneDropdown:SetVisible(true)
+        RefreshZonesButton:SetVisible(true)
+        Library:Notify('Скрипт фишинга загружен!', 3)
+    end
+})
+
+-- ================================================================
+-- БЛОК ESP (Scripts Tab)
+-- ================================================================
+local ESPTabBox = Tabs.Scripts:AddRightTabbox()
+
+local ESP = {
+    Ores     = ESPTabBox:AddTab('Ores'),
+    Trees    = ESPTabBox:AddTab('Trees'),
+    Fish     = ESPTabBox:AddTab('Fish'),
+    Caves    = ESPTabBox:AddTab('Caves'),
+    HitBoxes = ESPTabBox:AddTab('Hitbox'),
+}
+
+local TimeLabel, OreFilterInput, OreDropdown, RefreshOresButton
+local TeleportOreButton, AddOreESPButton, RemoveOreESPButton, OreESPToggle
+local TreeFilterInput, TreeDropdown, RefreshTreesButton
+local TeleportTreeButton, AddTreeESPButton, RemoveTreeESPButton, TreeESPToggle
+local FishDropdown, RefreshFishButton, TeleportFishButton, FishESPToggle
+local CaveNameInputField, SaveCaveButton, CaveDropdown, TeleportCaveButton
+
+local oreFilter  = ""
+local treeFilter = ""
+local CaveNameInput = ""
+
+-- ORES
+TimeLabel = ESP.Ores:AddLabel('Time: --:--')
+
+task.spawn(function()
+    while true do
+        task.wait(1)
+        if Library.Unloaded then break end
+        if _G.GetGameTime and TimeLabel then
+            TimeLabel:SetText('Time: ' .. _G.GetGameTime())
+        end
+    end
+end)
+
+OreFilterInput = ESP.Ores:AddInput('OreFilterInput', {
+    Text = 'Filter', Placeholder = 'e.g. Gold...',
+    Callback = function(v)
+        oreFilter = v
+        if _G.GetOreList and OreDropdown then OreDropdown:SetValues(_G.GetOreList(v)) end
+    end,
+})
+
+OreDropdown = ESP.Ores:AddDropdown('OreDropdown', { Text = 'Select Ore', Values = {}, Multi = false, AllowNull = true })
+RefreshOresButton = ESP.Ores:AddButton({ Text = 'Refresh', Func = function()
+    if _G.GetOreList then OreDropdown:SetValues(_G.GetOreList(oreFilter)) end
+end })
+TeleportOreButton = ESP.Ores:AddButton({ Text = 'Teleport to Selected', Func = function()
+    if _G.TeleportToOre and OreDropdown and OreDropdown.Value then _G.TeleportToOre(OreDropdown.Value) end
+end })
+AddOreESPButton = ESP.Ores:AddButton({ Text = 'Add to ESP', Func = function()
+    if not OreDropdown or not OreDropdown.Value then return end
+    local name = OreDropdown.Value:match("^(.-)%s*%[") or OreDropdown.Value
+    if _G.WorldESPConfig then
+        _G.WorldESPConfig.OreFilter[name] = true
+        _G.WorldESPConfig.OresEnabled = true
+        if OreESPToggle then OreESPToggle:SetValue(true) end
+        if _G.SaveESPConfig then _G.SaveESPConfig() end
+    end
+    Library:Notify("Added to ESP: " .. name, 2)
+end })
+RemoveOreESPButton = ESP.Ores:AddButton({ Text = 'Remove from ESP', Func = function()
+    if not OreDropdown or not OreDropdown.Value then return end
+    local name = OreDropdown.Value:match("^(.-)%s*%[") or OreDropdown.Value
+    if _G.WorldESPConfig then
+        _G.WorldESPConfig.OreFilter[name] = nil
+        if _G.SaveESPConfig then _G.SaveESPConfig() end
+    end
+    Library:Notify("Removed from ESP: " .. name, 2)
+end })
+
+OreESPToggle = ESP.Ores:AddToggle('OreESPToggle', {
+    Text = 'Ore ESP', Default = false,
+    Callback = function(v)
+        if _G.WorldESPConfig then _G.WorldESPConfig.OresEnabled = v; if _G.SaveESPConfig then _G.SaveESPConfig() end end
+    end,
+})
+OreESPToggle:AddColorPicker('OreESPColor', {
+    Default = Color3.fromRGB(255, 200, 0),
+    Callback = function(v)
+        if _G.WorldESPConfig then _G.WorldESPConfig.OreColor = v; if _G.SaveESPConfig then _G.SaveESPConfig() end end
+    end,
+})
+
+-- TREES
+TreeFilterInput = ESP.Trees:AddInput('TreeFilterInput', {
+    Text = 'Filter', Placeholder = 'e.g. Gold...',
+    Callback = function(v)
+        treeFilter = v
+        if _G.GetTreeList and TreeDropdown then TreeDropdown:SetValues(_G.GetTreeList(v)) end
+    end,
+})
+TreeDropdown = ESP.Trees:AddDropdown('TreeDropdown', { Text = 'Select Tree', Values = {}, Multi = false, AllowNull = true })
+RefreshTreesButton = ESP.Trees:AddButton({ Text = 'Refresh', Func = function()
+    if _G.GetTreeList then TreeDropdown:SetValues(_G.GetTreeList(treeFilter)) end
+end })
+TeleportTreeButton = ESP.Trees:AddButton({ Text = 'Teleport to Selected', Func = function()
+    if _G.TeleportToTree and TreeDropdown and TreeDropdown.Value then _G.TeleportToTree(TreeDropdown.Value) end
+end })
+AddTreeESPButton = ESP.Trees:AddButton({ Text = 'Add to ESP', Func = function()
+    if not TreeDropdown or not TreeDropdown.Value then return end
+    local name = TreeDropdown.Value:match("^(.-)%s*%[") or TreeDropdown.Value
+    if _G.WorldESPConfig then
+        _G.WorldESPConfig.TreeFilter[name] = true
+        _G.WorldESPConfig.TreesEnabled = true
+        if TreeESPToggle then TreeESPToggle:SetValue(true) end
+        if _G.SaveESPConfig then _G.SaveESPConfig() end
+    end
+    Library:Notify("Added to ESP: " .. name, 2)
+end })
+RemoveTreeESPButton = ESP.Trees:AddButton({ Text = 'Remove from ESP', Func = function()
+    if not TreeDropdown or not TreeDropdown.Value then return end
+    local name = TreeDropdown.Value:match("^(.-)%s*%[") or TreeDropdown.Value
+    if _G.WorldESPConfig then
+        _G.WorldESPConfig.TreeFilter[name] = nil
+        if _G.SaveESPConfig then _G.SaveESPConfig() end
+    end
+    Library:Notify("Removed from ESP: " .. name, 2)
+end })
+TreeESPToggle = ESP.Trees:AddToggle('TreeESPToggle', {
+    Text = 'Tree ESP', Default = false,
+    Callback = function(v)
+        if _G.WorldESPConfig then _G.WorldESPConfig.TreesEnabled = v; if _G.SaveESPConfig then _G.SaveESPConfig() end end
+    end,
+})
+TreeESPToggle:AddColorPicker('TreeESPColor', {
+    Default = Color3.fromRGB(0, 255, 100),
+    Callback = function(v)
+        if _G.WorldESPConfig then _G.WorldESPConfig.TreeColor = v; if _G.SaveESPConfig then _G.SaveESPConfig() end end
+    end,
+})
+
+-- FISH
+FishDropdown = ESP.Fish:AddDropdown('FishDropdown', { Text = 'Select Fish', Values = {}, Multi = false, AllowNull = true })
+RefreshFishButton = ESP.Fish:AddButton({ Text = 'Refresh', Func = function()
+    if _G.GetFishList then FishDropdown:SetValues(_G.GetFishList()) end
+end })
+TeleportFishButton = ESP.Fish:AddButton({ Text = 'Teleport to Selected', Func = function()
+    if _G.TeleportToFish and FishDropdown and FishDropdown.Value then _G.TeleportToFish(FishDropdown.Value) end
+end })
+FishESPToggle = ESP.Fish:AddToggle('FishESPToggle', {
+    Text = 'Big Fish ESP', Default = false,
+    Callback = function(v)
+        if _G.WorldESPConfig then _G.WorldESPConfig.FishEnabled = v; if _G.SaveESPConfig then _G.SaveESPConfig() end end
+    end,
+})
+FishESPToggle:AddColorPicker('FishESPColor', {
+    Default = Color3.fromRGB(0, 200, 255),
+    Callback = function(v)
+        if _G.WorldESPConfig then _G.WorldESPConfig.FishColor = v; if _G.SaveESPConfig then _G.SaveESPConfig() end end
+    end,
+})
+
+-- CAVES
+CaveNameInputField = ESP.Caves:AddInput('CaveNameInput', {
+    Text = 'Cave Name', Placeholder = 'Enter name...',
+    Callback = function(v) CaveNameInput = v end,
+})
+SaveCaveButton = ESP.Caves:AddButton({ Text = 'Save Current Position', Func = function()
+    if CaveNameInput ~= "" and _G.SaveCavePos then
+        _G.SaveCavePos(CaveNameInput)
+        Library:Notify("Saved: " .. CaveNameInput, 2)
+        if _G.GetCaveList and CaveDropdown then CaveDropdown:SetValues(_G.GetCaveList()) end
+    end
+end })
+CaveDropdown = ESP.Caves:AddDropdown('CaveDropdown', { Text = 'Select Cave', Values = {}, Multi = false, AllowNull = true })
+TeleportCaveButton = ESP.Caves:AddButton({ Text = 'Teleport to Cave', Func = function()
+    if _G.TeleportToCave and CaveDropdown and CaveDropdown.Value then _G.TeleportToCave(CaveDropdown.Value) end
+end })
+
+-- HITBOXES
+_G.Config = _G.Config or {}
+_G.Config.FishHitbox = _G.Config.FishHitbox or { Enabled = false, Multiplier = 30, OriginalSizes = {} }
+
+ESP.HitBoxes:AddToggle('BigFishHitboxToggle', {
+    Text     = 'Enable BigFish Expander',
+    Default  = _G.Config.FishHitbox.Enabled,
+    Callback = function(Value)
+        _G.Config.FishHitbox.Enabled = Value
+        if typeof(_G.updatrhitbox) == "function" then _G.updatrhitbox() end
+    end
+})
+
+ESP.HitBoxes:AddSlider('BigFishHitboxSize', {
+    Text     = 'Hitbox Size',
+    Default  = (_G.Config and _G.Config.FishHitbox and _G.Config.FishHitbox.Size and _G.Config.FishHitbox.Size.X) or 25,
+    Min = 5, Max = 150, Rounding = 0,
+    Callback = function(Value)
+        if not _G.Config then _G.Config = {} end
+        if not _G.Config.FishHitbox then _G.Config.FishHitbox = {} end
+        _G.Config.FishHitbox.Size = Vector3.new(Value, Value, Value)
+        if _G.Config.FishHitbox.Enabled and typeof(_G.updatrhitbox) == "function" then _G.updatrhitbox() end
+    end
+})
+
+ESP.HitBoxes:AddSlider('BigFishHitboxTrans', {
+    Text     = 'Transparency',
+    Default  = (_G.Config and _G.Config.FishHitbox and _G.Config.FishHitbox.Transparency) or 0.7,
+    Min = 0, Max = 1, Rounding = 2,
+    Callback = function(Value)
+        if not _G.Config then _G.Config = {} end
+        if not _G.Config.FishHitbox then _G.Config.FishHitbox = {} end
+        _G.Config.FishHitbox.Transparency = Value
+        if _G.Config.FishHitbox.Enabled and typeof(_G.updatrhitbox) == "function" then _G.updatrhitbox() end
+    end
+})
+
+ESP.HitBoxes:AddToggle('AutoFarmToggle', {
+    Text    = 'Включить Авто-Фарм',
+    Default = (_G.Config and _G.Config.AutoFarm and _G.Config.AutoFarm.Enabled) or false,
+    Callback = function(Value)
+        if _G.Config then
+            if not _G.Config.AutoFarm then _G.Config.AutoFarm = {} end
+            _G.Config.AutoFarm.Enabled = Value
+        end
+        if _G.SaveConfig then _G.SaveConfig() end
+    end
+})
+
+-- Load WorldESP button
+local LoadWorldESPButton = ESP.Ores:AddButton({
+    Text = 'RefineryCaves 2 Script',
+    Func = function()
+        if _G.WorldESPLoaded then Library:Notify('WorldESP уже загружен', 2); return end
+        RunRegisteredScript("WorldESP")
+        task.wait(1)
+        _G.WorldESPLoaded = true
+        if _G.WorldESPConfig then
+            if OreESPToggle  then OreESPToggle:SetValue(_G.WorldESPConfig.OresEnabled  or false) end
+            if TreeESPToggle then TreeESPToggle:SetValue(_G.WorldESPConfig.TreesEnabled or false) end
+            if FishESPToggle then FishESPToggle:SetValue(_G.WorldESPConfig.FishEnabled  or false) end
+        end
+        if _G.GetOreList  then OreDropdown:SetValues(_G.GetOreList(oreFilter))  end
+        if _G.GetTreeList then TreeDropdown:SetValues(_G.GetTreeList(treeFilter)) end
+        if _G.GetFishList then FishDropdown:SetValues(_G.GetFishList())          end
+        if _G.GetCaveList then CaveDropdown:SetValues(_G.GetCaveList())          end
+        Library:Notify("WorldESP loaded!", 3)
+    end
+})
+
+-- Авто-обновление списков
+task.spawn(function()
+    while true do
+        task.wait(0.5)
+        if Library.Unloaded then break end
+        if _G.GetOreList  and OreDropdown  then OreDropdown:SetValues(_G.GetOreList(oreFilter))   end
+        if _G.GetTreeList and TreeDropdown then TreeDropdown:SetValues(_G.GetTreeList(treeFilter)) end
+        if _G.GetFishList and FishDropdown then FishDropdown:SetValues(_G.GetFishList())           end
+        if _G.GetCaveList and CaveDropdown then CaveDropdown:SetValues(_G.GetCaveList())           end
+    end
+end)
+
+RegistryLeft:AddButton('Dark Dex V4',        function() RunRegisteredScript("Dex")           end)
+RegistryLeft:AddButton('Infinite Yield',     function() RunRegisteredScript("InfiniteYield") end)
+RegistryLeft:AddButton('Cobalt',             function() RunRegisteredScript("Cobalt")        end)
+RegistryLeft:AddButton('SimpleSpy V3',       function() RunRegisteredScript("SimpleSpy")     end)
+RegistryLeft:AddButton('ThirdPerson Camera', function() RunRegisteredScript("ThirdPerson")   end)
+RegistryLeft:AddButton('Shaders',            function() RunRegisteredScript('Shaders')       end)
+RegistryLeft:AddButton('Animation',          function() RunRegisteredScript('Animation')     end)
+
+-- ============================
+-- TAB: SETTINGS
+-- ============================
+local MenuGroup = Tabs.Settings:AddLeftGroupbox('Menu Management')
+
+MenuGroup:AddLabel('Menu Key'):AddKeyPicker('MenuKeybind', {
+    Default  = 'RightShift',
+    NoUI     = true,
+    Text     = 'Menu Keybind',
+    Callback = function() Library:Toggle() end,
+})
+
+MenuGroup:AddButton('Show Keybinds List', function()
+    if Library.KeybindFrame then
+        Library.KeybindFrame.Visible = not Library.KeybindFrame.Visible
+    end
+end)
+
+MenuGroup:AddButton('Unload Cheat Completely', function()
+    Library:Unload()
+end)
+
+-- ==================== ВЫГРУЗКА ====================
+Library:OnUnload(function()
+    pcall(function() FOVCircle:Destroy() end)
+    pcall(function() AimBotFOVCircle:Destroy() end)
+    pcall(function() SilentAimTracer:Destroy() end)
+    pcall(function() TargetHUD_Screen:Destroy() end)
+    pcall(function() HitLogGui:Destroy() end)
+    for _, l in pairs(CrosshairLines) do pcall(function() l:Remove() end) end
+    RemoveAllHighlights()
+    RemoveAllForceFields()
+    RemoveAllMechChams()
+    DestroyFlyObjects()
+    if SpinVelocity then pcall(function() SpinVelocity:Destroy() end); SpinVelocity = nil end
+    for _, cache in pairs(ESPCache) do
+        pcall(function() if cache.NameTag  then cache.NameTag:Remove()    end end)
+        pcall(function() if cache.Tracer   then cache.Tracer:Remove()     end end)
+        pcall(function() if cache.Highlight then cache.Highlight:Destroy() end end)
+        if cache.Bones    then for _, b in pairs(cache.Bones)    do pcall(function() b:Remove() end) end end
+        if cache.BoxLines then for _, l in pairs(cache.BoxLines) do pcall(function() l:Remove() end) end end
+    end
+    for _, name in ipairs({"LunarColor","LunarBloom","LunarBlur","LunarSun"}) do
+        local e = Lighting:FindFirstChild(name)
+        if e then pcall(function() e:Destroy() end) end
+    end
+    RemoveSilentAimHooks()
+    Workspace.Gravity = OriginalGravity
+    -- Восстанавливаем PlatformStand если был флай
+    local char = LocalPlayer.Character
+    local hum  = char and char:FindFirstChildOfClass("Humanoid")
+    if hum then hum.PlatformStand = false end
+end)
+
+-- ==================== МЕНЕДЖЕРЫ ====================
+task.spawn(function()
+    repeat task.wait(0.1) until ThemeManager and SaveManager
+        and type(ThemeManager.SetLibrary) == "function"
+        and type(SaveManager.SetLibrary)  == "function"
+
+    ThemeManager:SetLibrary(Library)
+    SaveManager:SetLibrary(Library)
+    ThemeManager:SetFolder('LunarHub')
+    SaveManager:SetFolder('LunarHub/configs')
+    SaveManager:BuildConfigSection(Tabs.Settings)
+    ThemeManager:ApplyToTab(Tabs.Settings)
+    pcall(function() SaveManager:LoadAutoloadConfig() end)
+end)
