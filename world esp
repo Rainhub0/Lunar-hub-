@@ -1,0 +1,628 @@
+-- ====================================================================
+--                      SERVICES & DEPENDENCIES
+-- ====================================================================
+local Players           = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService        = game:GetService("RunService")
+local Workspace         = game:GetService("Workspace")
+local HttpService       = game:GetService("HttpService")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera      = Workspace.CurrentCamera
+
+-- ====================================================================
+--                         PERFECT CATCH
+-- ====================================================================
+task.spawn(function()
+    local AttackEvent
+    repeat
+        AttackEvent = ReplicatedStorage:FindFirstChild("Events")
+            and ReplicatedStorage.Events:FindFirstChild("Tools")
+            and ReplicatedStorage.Events.Tools:FindFirstChild("Attack")
+        task.wait(0.1)
+    until AttackEvent
+
+    local mt          = getrawmetatable(game)
+    local oldNamecall = mt.__namecall
+    setreadonly(mt, false)
+
+    mt.__namecall = newcclosure(function(self, ...)
+        if self == AttackEvent then
+            local method = getnamecallmethod()
+            if method == "FireServer" then
+                local args = {...}
+                if type(args[1]) == "table" then
+                    args[1].Alpha        = 0.995 + math.random() * 0.004
+                    args[1].ResponseTime = 0.955 + math.random() * 0.005
+                end
+                return oldNamecall(self, table.unpack(args))
+            end
+        end
+        return oldNamecall(self, ...)
+    end)
+
+    setreadonly(mt, true)
+    print("[PerfectCatch] Loaded!")
+end)
+
+-- ====================================================================
+--                     UNIFIED CONFIG SYSTEM
+-- ====================================================================
+pcall(function()
+    if not isfolder("LunarHub") then makefolder("LunarHub") end
+end)
+
+local CONFIG_FILE = "LunarHub/config.json"
+
+_G.Config = {
+    FishHitbox = {
+        Enabled       = false,
+        Size          = Vector3.new(25, 25, 25),
+        Transparency  = 0.7,
+        OriginalSizes = {}
+    },
+    WorldESP = {
+        OresEnabled  = false,
+        TreesEnabled = false,
+        FishEnabled  = false,
+        OreColor     = Color3.fromRGB(255, 200, 0),
+        TreeColor    = Color3.fromRGB(0, 255, 100),
+        FishColor    = Color3.fromRGB(0, 200, 255),
+        OreFilter    = {},
+        TreeFilter   = {}
+    },
+    Caves    = {},
+    AutoFarm = {
+        Enabled        = false,
+        TargetName     = "Odd Stone",
+        FolderType     = "Ores",
+        AttackDelay    = 0.3,
+        DistanceOffset = Vector3.new(0, 3, 3)
+    }
+}
+
+_G.WorldESPConfig = _G.Config.WorldESP
+
+local function LoadConfig()
+    if not isfile(CONFIG_FILE) then return end
+    local ok, result = pcall(function()
+        return HttpService:JSONDecode(readfile(CONFIG_FILE))
+    end)
+    if not ok or type(result) ~= "table" then return end
+
+    if result.FishHitbox then
+        _G.Config.FishHitbox.Enabled      = result.FishHitbox.Enabled or false
+        _G.Config.FishHitbox.Transparency = result.FishHitbox.Transparency or 0.7
+        if result.FishHitbox.Size then
+            _G.Config.FishHitbox.Size = Vector3.new(
+                result.FishHitbox.Size.X or 25,
+                result.FishHitbox.Size.Y or 25,
+                result.FishHitbox.Size.Z or 25)
+        end
+    end
+
+    if result.WorldESP then
+        local esp, res = _G.Config.WorldESP, result.WorldESP
+        esp.OresEnabled  = res.OresEnabled  or false
+        esp.TreesEnabled = res.TreesEnabled or false
+        esp.FishEnabled  = res.FishEnabled  or false
+        esp.OreFilter    = res.OreFilter    or {}
+        esp.TreeFilter   = res.TreeFilter   or {}
+        if res.OreColor  then esp.OreColor  = Color3.fromRGB(res.OreColor.R,  res.OreColor.G,  res.OreColor.B)  end
+        if res.TreeColor then esp.TreeColor = Color3.fromRGB(res.TreeColor.R, res.TreeColor.G, res.TreeColor.B) end
+        if res.FishColor then esp.FishColor = Color3.fromRGB(res.FishColor.R, res.FishColor.G, res.FishColor.B) end
+    end
+
+    if result.Caves then
+        for name, pos in pairs(result.Caves) do
+            if pos and pos.X and pos.Y and pos.Z then
+                _G.Config.Caves[name] = CFrame.new(pos.X, pos.Y, pos.Z)
+            end
+        end
+    end
+
+    if result.AutoFarm then
+        local farm, res = _G.Config.AutoFarm, result.AutoFarm
+        farm.Enabled     = res.Enabled     or false
+        farm.TargetName  = res.TargetName  or "Odd Stone"
+        farm.FolderType  = res.FolderType  or "Ores"
+        farm.AttackDelay = res.AttackDelay or 0.3
+    end
+end
+
+local function SaveConfig()
+    local ok, err = pcall(function()
+        local fishCfg, espCfg = _G.Config.FishHitbox, _G.Config.WorldESP
+        local cavesData = {}
+        for name, cf in pairs(_G.Config.Caves) do
+            cavesData[name] = {X = cf.Position.X, Y = cf.Position.Y, Z = cf.Position.Z}
+        end
+        writefile(CONFIG_FILE, HttpService:JSONEncode({
+            FishHitbox = {
+                Enabled      = fishCfg.Enabled,
+                Transparency = fishCfg.Transparency,
+                Size         = {X = fishCfg.Size.X, Y = fishCfg.Size.Y, Z = fishCfg.Size.Z}
+            },
+            WorldESP = {
+                OresEnabled  = espCfg.OresEnabled,
+                TreesEnabled = espCfg.TreesEnabled,
+                FishEnabled  = espCfg.FishEnabled,
+                OreFilter    = espCfg.OreFilter,
+                TreeFilter   = espCfg.TreeFilter,
+                OreColor  = {R = math.floor(espCfg.OreColor.R  * 255), G = math.floor(espCfg.OreColor.G  * 255), B = math.floor(espCfg.OreColor.B  * 255)},
+                TreeColor = {R = math.floor(espCfg.TreeColor.R * 255), G = math.floor(espCfg.TreeColor.G * 255), B = math.floor(espCfg.TreeColor.B * 255)},
+                FishColor = {R = math.floor(espCfg.FishColor.R * 255), G = math.floor(espCfg.FishColor.G * 255), B = math.floor(espCfg.FishColor.B * 255)}
+            },
+            AutoFarm = {
+                Enabled     = _G.Config.AutoFarm.Enabled,
+                TargetName  = _G.Config.AutoFarm.TargetName,
+                FolderType  = _G.Config.AutoFarm.FolderType,
+                AttackDelay = _G.Config.AutoFarm.AttackDelay
+            },
+            Caves = cavesData
+        }))
+    end)
+    if not ok then warn("[Config] Ошибка при сохранении:", err) end
+end
+
+LoadConfig()
+_G.SaveConfig    = SaveConfig
+_G.SaveESPConfig = SaveConfig
+
+-- ====================================================================
+--                           WORLD ESP SYSTEM
+-- ====================================================================
+local OreESP  = {}
+local TreeESP = {}
+local FishESP = {}
+
+local function isDecoration(name)
+    local n = name:lower()
+    return n:find("decorat", 1, true) or n:find("\xd0\xb4\xd0\xb5\xd0\xba\xd0\xbe\xd1\x80\xd0\xb0", 1, true)
+end
+
+local function createEntry(obj, color)
+    local text = Drawing.new("Text")
+    text.Visible = false
+    text.Center  = true
+    text.Outline = true
+    text.Size    = 13
+    text.Font    = 2
+
+    local hl = Instance.new("Highlight")
+    hl.FillColor           = color
+    hl.OutlineColor        = Color3.fromRGB(255, 255, 255)
+    hl.FillTransparency    = 0.5
+    hl.OutlineTransparency = 0
+    hl.DepthMode           = Enum.HighlightDepthMode.AlwaysOnTop
+    hl.Adornee             = obj
+    hl.Enabled             = false
+    hl.Parent              = LocalPlayer.PlayerGui
+
+    return { Text = text, Highlight = hl, Obj = obj }
+end
+
+local function removeEntry(entry)
+    pcall(function() entry.Text:Remove() end)
+    pcall(function() entry.Highlight:Destroy() end)
+end
+
+local function setupFolderWatcher(folder, cache, colorGetter)
+    if not folder then return end
+    for _, obj in ipairs(folder:GetChildren()) do
+        if not isDecoration(obj.Name) then
+            cache[obj] = createEntry(obj, colorGetter())
+        end
+    end
+    folder.ChildAdded:Connect(function(child)
+        if isDecoration(child.Name) then return end
+        task.wait()
+        cache[child] = createEntry(child, colorGetter())
+    end)
+    folder.ChildRemoved:Connect(function(child)
+        local entry = cache[child]
+        if entry then removeEntry(entry); cache[child] = nil end
+    end)
+end
+
+local function updateESP(cache, enabled, color, nameFilter)
+    local hasFilter = nameFilter and next(nameFilter) ~= nil
+
+    if not enabled then
+        for _, entry in pairs(cache) do
+            if entry.Text.Visible      then entry.Text.Visible      = false end
+            if entry.Highlight.Enabled then entry.Highlight.Enabled = false end
+        end
+        return
+    end
+
+    local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    local myPos  = myRoot and myRoot.Position
+
+    for obj, entry in pairs(cache) do
+        if not obj or not obj.Parent then
+            removeEntry(entry)
+            cache[obj] = nil
+            continue
+        end
+
+        if hasFilter and not nameFilter[obj.Name] then
+            if entry.Text.Visible      then entry.Text.Visible      = false end
+            if entry.Highlight.Enabled then entry.Highlight.Enabled = false end
+            continue
+        end
+
+        local root = obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")
+        if not root then
+            if entry.Text.Visible      then entry.Text.Visible      = false end
+            if entry.Highlight.Enabled then entry.Highlight.Enabled = false end
+            continue
+        end
+
+        if entry.Highlight.FillColor ~= color then entry.Highlight.FillColor = color end
+        if not entry.Highlight.Enabled then entry.Highlight.Enabled = true end
+
+        local rootPos            = root.Position
+        local screenPos, onScreen = Camera:WorldToViewportPoint(rootPos)
+
+        if not onScreen then
+            if entry.Text.Visible then entry.Text.Visible = false end
+            continue
+        end
+
+        local dist     = myPos and math.floor((myPos - rootPos).Magnitude) or 0
+        local newLabel = obj.Name .. " [" .. dist .. "m]"
+        entry.Text.Position = Vector2.new(screenPos.X, screenPos.Y - 15)
+        if entry.Text.Text  ~= newLabel then entry.Text.Text  = newLabel end
+        if entry.Text.Color ~= color    then entry.Text.Color = color    end
+        if not entry.Text.Visible then entry.Text.Visible = true end
+    end
+end
+
+-- ====================================================================
+--                         AUTO FARM SYSTEM
+-- ====================================================================
+local function getFarmFolder()
+    local farmCfg = _G.Config and _G.Config.AutoFarm
+    if not farmCfg then return nil end
+    if farmCfg.FolderType == "BigFish" then
+        return Workspace:FindFirstChild("BigFish")
+    else
+        local ws = Workspace:FindFirstChild("WorldSpawn")
+        return ws and ws:FindFirstChild(farmCfg.FolderType)
+    end
+end
+
+local _farmTargetCache = nil
+
+local function getClosestTarget()
+    local farmCfg = _G.Config.AutoFarm
+    local folder  = getFarmFolder()
+    if not folder or not farmCfg.TargetName or farmCfg.TargetName == "" then return nil end
+
+    local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not myRoot then return nil end
+
+    if _farmTargetCache and _farmTargetCache.Parent then
+        return _farmTargetCache
+    end
+
+    local myPos = myRoot.Position
+    local closest, shortest = nil, math.huge
+
+    for _, obj in ipairs(folder:GetChildren()) do
+        if not isDecoration(obj.Name) and obj.Name == farmCfg.TargetName then
+            local root = obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")
+            if root then
+                local dist = (myPos - root.Position).Magnitude
+                if dist < shortest then shortest = dist; closest = obj end
+            end
+        end
+    end
+
+    _farmTargetCache = closest
+    return closest
+end
+
+task.spawn(function()
+    local folder = getFarmFolder()
+    if folder then
+        folder.ChildRemoved:Connect(function(child)
+            if _farmTargetCache == child then _farmTargetCache = nil end
+        end)
+    end
+end)
+
+local _eventsFolder = nil
+local function getEventsFolder()
+    if _eventsFolder then return _eventsFolder end
+    local ev = ReplicatedStorage:FindFirstChild("Events")
+    if ev then _eventsFolder = ev:FindFirstChild("Tools") end
+    return _eventsFolder
+end
+
+task.spawn(function()
+    while true do
+        local farmCfg = _G.Config and _G.Config.AutoFarm
+
+        if not farmCfg or not farmCfg.Enabled then
+            task.wait(0.5)
+            continue
+        end
+
+        local character = LocalPlayer.Character
+        local myRoot    = character and character:FindFirstChild("HumanoidRootPart")
+        local humanoid  = character and character:FindFirstChildOfClass("Humanoid")
+
+        if myRoot and humanoid then
+            local targetObj = getClosestTarget()
+            if targetObj then
+                local targetPart = targetObj.PrimaryPart or targetObj:FindFirstChildWhichIsA("BasePart")
+                if targetPart then
+                    local targetPos = targetPart.Position
+                    local spawnPos  = targetPos + (farmCfg.DistanceOffset or Vector3.new(0, 3, 3))
+                    myRoot.CFrame   = CFrame.lookAt(spawnPos, targetPos)
+
+                    local tool = character:FindFirstChildOfClass("Tool")
+                    if not tool then
+                        local bt = LocalPlayer.Backpack:FindFirstChildOfClass("Tool")
+                        if bt then humanoid:EquipTool(bt); tool = bt; task.wait(0.1) end
+                    end
+
+                    if tool then tool:Activate() end
+
+                    local evf = getEventsFolder()
+                    if evf then
+                        local chargeEvent = evf:FindFirstChild("Charge")
+                        local attackEvent = evf:FindFirstChild("Attack")
+                        if chargeEvent then chargeEvent:FireServer({Target = targetPart, HitPosition = targetPos}) end
+                        if attackEvent  then attackEvent:FireServer({Target = targetPart, HitPosition = targetPos, Tool = tool}) end
+                    end
+                end
+            end
+        end
+
+        task.wait(farmCfg.AttackDelay or 0.3)
+    end
+end)
+
+-- ====================================================================
+--            BIG FISH HITBOX EXPANDER
+-- ====================================================================
+local function applyHitbox(fishObj)
+    if not fishObj or isDecoration(fishObj.Name) then return end
+    local cfg = _G.Config and _G.Config.FishHitbox
+    if not cfg then return end
+
+    local hitFolder = fishObj:FindFirstChild("Hit")
+    local rootPart  = hitFolder and hitFolder:FindFirstChild("RootPart")
+    if not rootPart or not rootPart:IsA("BasePart") then return end
+
+    if not cfg.OriginalSizes[rootPart] then
+        cfg.OriginalSizes[rootPart] = {
+            Size         = rootPart.Size,
+            Transparency = rootPart.Transparency,
+            CanCollide   = rootPart.CanCollide,
+            Massless     = rootPart.Massless
+        }
+    end
+
+    local orig = cfg.OriginalSizes[rootPart]
+    if cfg.Enabled then
+        if rootPart.Size ~= cfg.Size then
+            rootPart.Size         = cfg.Size
+            rootPart.Transparency = cfg.Transparency
+            rootPart.CanCollide   = false
+            rootPart.Massless     = true
+        end
+    else
+        if rootPart.Size ~= orig.Size then
+            rootPart.Size         = orig.Size
+            rootPart.Transparency = orig.Transparency
+            rootPart.CanCollide   = orig.CanCollide
+            rootPart.Massless     = orig.Massless
+        end
+    end
+end
+
+_G.updatrhitbox = function()
+    local bf = Workspace:FindFirstChild("BigFish")
+    if not bf then return end
+    for _, fishObj in ipairs(bf:GetChildren()) do applyHitbox(fishObj) end
+end
+
+task.spawn(function()
+    local bigFishFolder = Workspace:WaitForChild("BigFish", 10)
+    if not bigFishFolder then return end
+
+    for _, fishObj in ipairs(bigFishFolder:GetChildren()) do applyHitbox(fishObj) end
+
+    bigFishFolder.ChildAdded:Connect(function(child)
+        task.wait(0.05)
+        applyHitbox(child)
+    end)
+
+    local lastEnabled = _G.Config.FishHitbox.Enabled
+    while true do
+        local cur = _G.Config and _G.Config.FishHitbox and _G.Config.FishHitbox.Enabled
+        if cur ~= lastEnabled then
+            lastEnabled = cur
+            for _, fishObj in ipairs(bigFishFolder:GetChildren()) do applyHitbox(fishObj) end
+        end
+        task.wait(1)
+    end
+end)
+
+-- ====================================================================
+--                       ESP WATCHER SETUP
+-- ====================================================================
+task.spawn(function()
+    local worldSpawn = Workspace:WaitForChild("WorldSpawn", 15)
+    if worldSpawn then
+        local ores  = worldSpawn:WaitForChild("Ores",  10)
+        local trees = worldSpawn:WaitForChild("Trees", 10)
+        local esp   = _G.Config.WorldESP
+        if ores  then setupFolderWatcher(ores,  OreESP,  function() return esp.OreColor  end) end
+        if trees then setupFolderWatcher(trees, TreeESP, function() return esp.TreeColor end) end
+    end
+end)
+
+task.spawn(function()
+    local bigFishFolder = Workspace:WaitForChild("BigFish", 10)
+    if bigFishFolder then
+        local esp = _G.Config.WorldESP
+        setupFolderWatcher(bigFishFolder, FishESP, function() return esp.FishColor end)
+        for _, fishObj in ipairs(bigFishFolder:GetChildren()) do
+            task.wait(0.05)
+            applyHitbox(fishObj)
+        end
+    end
+end)
+
+-- ====================================================================
+--                       VEHICLE TELEPORT SYSTEM
+-- ====================================================================
+local savedVehicleCFrame = nil
+
+local function getTargetRoot()
+    local character = LocalPlayer.Character
+    if not character then return nil end
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return nil end
+    if humanoid.SeatPart and humanoid.SeatPart:IsA("VehicleSeat") then
+        local vehicle = humanoid.SeatPart.Parent
+        return vehicle.PrimaryPart or humanoid.SeatPart, true
+    elseif humanoid.SeatPart then
+        return humanoid.SeatPart.Parent.PrimaryPart or humanoid.SeatPart, true
+    else
+        return character:FindFirstChild("HumanoidRootPart"), false
+    end
+end
+
+local function saveVehiclePos()
+    local root = getTargetRoot()
+    if root then savedVehicleCFrame = root.CFrame; print("[VehicleTP] Точка сохранена!") end
+end
+
+local function tpVehicleToSaved()
+    if not savedVehicleCFrame then warn("[VehicleTP] Точка еще не сохранена!"); return end
+    local root, isVehicle = getTargetRoot()
+    if root then
+        if isVehicle then
+            local vehicle = root:FindFirstAncestorOfClass("Model") or root.Parent
+            for _, part in ipairs(vehicle:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    part.AssemblyLinearVelocity  = Vector3.zero
+                    part.AssemblyAngularVelocity = Vector3.zero
+                end
+            end
+        end
+        root.CFrame = savedVehicleCFrame + Vector3.new(0, 2, 0)
+        print("[VehicleTP] Телепорт выполнен!")
+    end
+end
+
+-- ====================================================================
+--                           RENDER LOOP
+-- ====================================================================
+RunService.RenderStepped:Connect(function()
+    local espCfg = _G.Config.WorldESP
+    if not espCfg.OresEnabled and not espCfg.TreesEnabled and not espCfg.FishEnabled then return end
+
+    updateESP(OreESP,  espCfg.OresEnabled,  espCfg.OreColor,  espCfg.OreFilter)
+    updateESP(TreeESP, espCfg.TreesEnabled, espCfg.TreeColor, espCfg.TreeFilter)
+    updateESP(FishESP, espCfg.FishEnabled,  espCfg.FishColor, nil)
+end)
+
+-- ====================================================================
+--                           HELPERS & TELEPORTS
+-- ====================================================================
+local function getObjectList(folder, filter)
+    local list = {}
+    if not folder then return list end
+    local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    local myPos  = myRoot and myRoot.Position
+    for _, obj in ipairs(folder:GetChildren()) do
+        if isDecoration(obj.Name) then continue end
+        local root = obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")
+        if not root then continue end
+        if filter and filter ~= "" then
+            if not obj.Name:lower():find(filter:lower(), 1, true) then continue end
+        end
+        local dist = myPos and math.floor((myPos - root.Position).Magnitude) or 0
+        table.insert(list, obj.Name .. " [" .. dist .. "m]")
+    end
+    table.sort(list, function(a, b)
+        local da = tonumber(a:match("%[(%d+)m%]")) or 0
+        local db = tonumber(b:match("%[(%d+)m%]")) or 0
+        return da < db
+    end)
+    return list
+end
+
+local function teleportToObject(folder, selectedName)
+    if not folder or not selectedName then return end
+    local baseName = selectedName:match("^(.-)%s*%[") or selectedName
+    local myRoot   = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not myRoot then return end
+    local bestDist, bestRoot = math.huge, nil
+    local myPos = myRoot.Position
+    for _, obj in ipairs(folder:GetChildren()) do
+        if obj.Name == baseName then
+            local root = obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")
+            if root then
+                local dist = (myPos - root.Position).Magnitude
+                if dist < bestDist then bestDist = dist; bestRoot = root end
+            end
+        end
+    end
+    if bestRoot then myRoot.CFrame = CFrame.new(bestRoot.Position + Vector3.new(0, 5, 0)) end
+end
+
+local function getGameTime()
+    local clockTime = Workspace:FindFirstChild("ServerData")
+        and Workspace.ServerData:FindFirstChild("CurrentCycle")
+        and Workspace.ServerData.CurrentCycle:FindFirstChild("ClockTime")
+    if not clockTime then return "??Wait??" end
+    local t     = clockTime.Value
+    local hours = math.floor(t)
+    local mins  = math.floor((t - hours) * 60)
+    return string.format("%02d:%02d", hours, mins)
+end
+
+-- ====================================================================
+--                           GLOBAL EXPORTS
+-- ====================================================================
+_G.GetOreList  = function(filter) return getObjectList(Workspace:FindFirstChild("WorldSpawn") and Workspace.WorldSpawn:FindFirstChild("Ores"),  filter) end
+_G.GetTreeList = function(filter) return getObjectList(Workspace:FindFirstChild("WorldSpawn") and Workspace.WorldSpawn:FindFirstChild("Trees"), filter) end
+_G.GetFishList = function()       return getObjectList(Workspace:FindFirstChild("BigFish"), nil) end
+
+_G.TeleportToOre  = function(name) teleportToObject(Workspace:FindFirstChild("WorldSpawn") and Workspace.WorldSpawn:FindFirstChild("Ores"),  name) end
+_G.TeleportToTree = function(name) teleportToObject(Workspace:FindFirstChild("WorldSpawn") and Workspace.WorldSpawn:FindFirstChild("Trees"), name) end
+_G.TeleportToFish = function(name) teleportToObject(Workspace:FindFirstChild("BigFish"), name) end
+
+_G.SaveCavePos = function(name)
+    local r = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if r then _G.Config.Caves[name] = r.CFrame; SaveConfig() end
+end
+
+_G.DeleteCavePos = function(name)
+    _G.Config.Caves[name] = nil
+    SaveConfig()
+end
+
+_G.TeleportToCave = function(name)
+    local r = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if r and _G.Config.Caves[name] then r.CFrame = _G.Config.Caves[name] end
+end
+
+_G.GetCaveList = function()
+    local l = {}
+    for n in pairs(_G.Config.Caves) do table.insert(l, n) end
+    table.sort(l)
+    return l
+end
+
+_G.SaveVehiclePos = saveVehiclePos
+_G.TPVehicle      = tpVehicleToSaved
+_G.GetGameTime    = getGameTime
