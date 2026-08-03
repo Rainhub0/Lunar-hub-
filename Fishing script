@@ -1,0 +1,239 @@
+-- Fishing Script (Ultra Optimized + Teleport Support)
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+local LocalPlayer = Players.LocalPlayer
+
+if not _G.FishingConfig then
+    _G.FishingConfig = {
+        Enabled = false,
+        WaitBite = 4.1,
+        ReelDuration = 2,
+        HitInterval = 0.12,
+        ResetDelay = 0,
+        SelectedZone = "По умолчанию",
+        AutoTeleportToZone = false, -- Включите true, если хотите автоматически телепортироваться к зоне перед забросом
+    }
+end
+
+-- Список точек для телепортации (можно добавлять свои названия и Vector3 координаты)
+_G.TeleportPoints = {
+    ["Спавн"] = Vector3.new(0, 10, 0),
+    ["Озеро"] = Vector3.new(100, 5, -200),
+    ["Океан"] = Vector3.new(-500, 5, 300),
+    ["Секретное место"] = Vector3.new(1200, 15, -450),
+}
+
+--- ==========================================
+--- ФУНКЦИИ ТЕЛЕПОРТАЦИИ
+--- ==========================================
+
+-- Главная функция телепортации к Vector3, CFrame или по имени точки/зоны
+local function TeleportTo(target)
+    local char = LocalPlayer.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if not root then return false end
+
+    -- Если переданы прямо координаты Vector3 или CFrame
+    if typeof(target) == "Vector3" then
+        root.CFrame = CFrame.new(target)
+        return true
+    elseif typeof(target) == "CFrame" then
+        root.CFrame = target
+        return true
+    end
+
+    -- Если передано название точки из _G.TeleportPoints
+    if typeof(target) == "string" and _G.TeleportPoints[target] then
+        root.CFrame = CFrame.new(_G.TeleportPoints[target])
+        return true
+    end
+
+    -- Поиск зоны внутри Workspace.MouseIgnore.FishZones (как в оригинальном скрипте)
+    local fishZones = Workspace:FindFirstChild("MouseIgnore") and Workspace.MouseIgnore:FindFirstChild("FishZones")
+    if typeof(target) == "string" and fishZones then
+        local zonePart = fishZones:FindFirstChild(target)
+        if zonePart then
+            if zonePart:IsA("BasePart") then
+                root.CFrame = CFrame.new(zonePart.Position + Vector3.new(0, 3, 0))
+                return true
+            elseif zonePart:FindFirstChildWhichIsA("BasePart") then
+                local p = zonePart:FindFirstChildWhichIsA("BasePart")
+                root.CFrame = CFrame.new(p.Position + Vector3.new(0, 3, 0))
+                return true
+            end
+        end
+    end
+
+    warn("Teleport: Точка или зона не найдена ->", tostring(target))
+    return false
+end
+
+-- Экспортируем функцию глобально, чтобы её можно было вызывать из внешних UI / консоли
+_G.TeleportTo = TeleportTo
+
+-- Дополнительная функция: сохранить текущие координаты персонажа под именем
+_G.SaveCurrentPosition = function(pointName)
+    local char = LocalPlayer.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if root and pointName then
+        _G.TeleportPoints[pointName] = root.Position
+        print("Точка сохранена:", pointName, root.Position)
+    end
+end
+
+--- ==========================================
+--- ОСНОВНОЙ ФУНКЦИОНАЛ РЫБАЛКИ
+--- ==========================================
+
+local Events = nil
+local function getEvents()
+    if Events then return Events end
+    local events = ReplicatedStorage:FindFirstChild("Events")
+    if not events then return nil end
+    local fish = events:FindFirstChild("Fish")
+    if not fish then return nil end
+    local hit = fish:FindFirstChild("ReelSessionHit")
+    local endEv = fish:FindFirstChild("ReelSessionEnd")
+    local charge = events:FindFirstChild("Tools") and events.Tools:FindFirstChild("Charge")
+    if hit and endEv and charge then
+        Events = { Hit = hit, End = endEv, Charge = charge }
+        return Events
+    end
+    return nil
+end
+
+local function getFishingRod()
+    local char = LocalPlayer.Character
+    if char then
+        for _, item in ipairs(char:GetChildren()) do
+            if item:IsA("Tool") then
+                local n = item.Name:lower()
+                if n:find("rod") or n:find("fish") or n:find("удочк") then
+                    return item, true
+                end
+            end
+        end
+    end
+    local backpack = LocalPlayer:FindFirstChildOfClass("Backpack")
+    if backpack then
+        for _, item in ipairs(backpack:GetChildren()) do
+            if item:IsA("Tool") then
+                local n = item.Name:lower()
+                if n:find("rod") or n:find("fish") or n:find("удочк") then
+                    return item, false
+                end
+            end
+        end
+    end
+    return nil, false
+end
+
+local function getCastPosition()
+    local char = LocalPlayer.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if not root then return CFrame.new(0,0,0) end
+    local fishZones = Workspace:FindFirstChild("MouseIgnore") and Workspace.MouseIgnore:FindFirstChild("FishZones")
+    local zone = _G.FishingConfig.SelectedZone
+    if zone and zone ~= "По умолчанию" and fishZones then
+        local targetZone = fishZones:FindFirstChild(zone)
+        if targetZone then
+            if targetZone:IsA("BasePart") then
+                return CFrame.new(targetZone.Position)
+            elseif targetZone:FindFirstChildWhichIsA("BasePart") then
+                return CFrame.new(targetZone:FindFirstChildWhichIsA("BasePart").Position)
+            end
+        end
+    end
+    local pos = root.Position + root.CFrame.LookVector * 15 + Vector3.new(0, -3, 0)
+    return CFrame.new(pos)
+end
+
+local function equipRod(rod)
+    local char = LocalPlayer.Character
+    if char and rod.Parent ~= char then
+        rod.Parent = char
+        task.wait(0.3)
+    end
+end
+
+local FishingThread = nil
+local EventConnection = nil
+local sessionFinished = false
+
+local function ToggleFishing(value)
+    if FishingThread then
+        task.cancel(FishingThread)
+        FishingThread = nil
+    end
+    if EventConnection then
+        EventConnection:Disconnect()
+        EventConnection = nil
+    end
+
+    _G.FishingConfig.Enabled = value
+    if not value then return end
+
+    local events = getEvents()
+    if not events then
+        warn("Fishing: Events not found")
+        _G.FishingConfig.Enabled = false
+        return
+    end
+
+    EventConnection = events.End.OnClientEvent:Connect(function()
+        sessionFinished = true
+    end)
+
+    FishingThread = task.spawn(function()
+        local cfg = _G.FishingConfig
+        while cfg.Enabled do
+            sessionFinished = false
+
+            -- Авто-телепорт к выбранной зоне, если включена опция
+            if cfg.AutoTeleportToZone and cfg.SelectedZone and cfg.SelectedZone ~= "По умолчанию" then
+                TeleportTo(cfg.SelectedZone)
+                task.wait(0.5)
+            end
+
+            local rod, equipped = getFishingRod()
+            if not rod then
+                task.wait(3)
+                continue
+            end
+            if not equipped then
+                equipRod(rod)
+            end
+
+            local castPos = getCastPosition()
+            local success = pcall(function()
+                events.Charge:FireServer({ HitPosition = castPos })
+            end)
+            if not success then
+                task.wait(1)
+                continue
+            end
+
+            local biteTimer = 0
+            while biteTimer < cfg.WaitBite and cfg.Enabled and not sessionFinished do
+                task.wait(0.1)
+                biteTimer = biteTimer + 0.1
+            end
+
+            if not cfg.Enabled then break end
+
+            local endTime = tick() + cfg.ReelDuration
+            while tick() < endTime and cfg.Enabled and not sessionFinished do
+                pcall(function() events.Hit:FireServer() end)
+                task.wait(cfg.HitInterval)
+            end
+
+            pcall(function() events.End:FireServer() end)
+            task.wait(cfg.ResetDelay)
+        end
+    end)
+end
+
+_G.ToggleFishing = ToggleFishing
+
+print("Fishing script updated with Teleport system!")
