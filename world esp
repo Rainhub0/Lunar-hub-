@@ -11,7 +11,7 @@ local LocalPlayer = Players.LocalPlayer
 local Camera      = Workspace.CurrentCamera
 
 -- ====================================================================
---                         PERFECT CATCH
+--                          PERFECT CATCH
 -- ====================================================================
 task.spawn(function()
     local AttackEvent
@@ -46,7 +46,7 @@ task.spawn(function()
 end)
 
 -- ====================================================================
---                     UNIFIED CONFIG SYSTEM
+--                      UNIFIED CONFIG SYSTEM
 -- ====================================================================
 pcall(function()
     if not isfolder("LunarHub") then makefolder("LunarHub") end
@@ -113,6 +113,7 @@ local function LoadConfig()
             end
         end
     end
+end -- Closed LoadConfig properly here
 
 local function SaveConfig()
     local ok, err = pcall(function()
@@ -148,7 +149,7 @@ _G.SaveConfig    = SaveConfig
 _G.SaveESPConfig = SaveConfig
 
 -- ====================================================================
---                           WORLD ESP SYSTEM
+--                            WORLD ESP SYSTEM
 -- ====================================================================
 local OreESP  = {}
 local TreeESP = {}
@@ -325,7 +326,7 @@ task.spawn(function()
 end)
 
 -- ====================================================================
---                       ESP WATCHER SETUP
+--                        ESP WATCHER SETUP
 -- ====================================================================
 task.spawn(function()
     local worldSpawn = Workspace:WaitForChild("WorldSpawn", 15)
@@ -351,7 +352,7 @@ task.spawn(function()
 end)
 
 -- ====================================================================
---                           RENDER LOOP
+--                            RENDER LOOP
 -- ====================================================================
 RunService.RenderStepped:Connect(function()
     local espCfg = _G.Config.WorldESP
@@ -363,7 +364,7 @@ RunService.RenderStepped:Connect(function()
 end)
 
 -- ====================================================================
---                           HELPERS & TELEPORTS
+--                            HELPERS & TELEPORTS
 -- ====================================================================
 local function getObjectList(folder, filter)
     local list = {}
@@ -408,7 +409,7 @@ local function teleportToObject(folder, selectedName)
 end
 
 -- ====================================================================
---                           GLOBAL EXPORTS
+--                            GLOBAL EXPORTS
 -- ====================================================================
 _G.GetOreList  = function(filter) return getObjectList(Workspace:FindFirstChild("WorldSpawn") and Workspace.WorldSpawn:FindFirstChild("Ores"),  filter) end
 _G.GetTreeList = function(filter) return getObjectList(Workspace:FindFirstChild("WorldSpawn") and Workspace.WorldSpawn:FindFirstChild("Trees"), filter) end
