@@ -72,13 +72,6 @@ _G.Config = {
         TreeFilter   = {}
     },
     Caves    = {},
-    AutoFarm = {
-        Enabled        = false,
-        TargetName     = "Odd Stone",
-        FolderType     = "Ores",
-        AttackDelay    = 0.3,
-        DistanceOffset = Vector3.new(0, 3, 3)
-    }
 }
 
 _G.WorldESPConfig = _G.Config.WorldESP
@@ -262,7 +255,7 @@ local function updateESP(cache, enabled, color, nameFilter)
         if entry.Highlight.FillColor ~= color then entry.Highlight.FillColor = color end
         if not entry.Highlight.Enabled then entry.Highlight.Enabled = true end
 
-        local rootPos            = root.Position
+        local rootPos             = root.Position
         local screenPos, onScreen = Camera:WorldToViewportPoint(rootPos)
 
         if not onScreen then
@@ -278,113 +271,6 @@ local function updateESP(cache, enabled, color, nameFilter)
         if not entry.Text.Visible then entry.Text.Visible = true end
     end
 end
-
--- ====================================================================
---                         AUTO FARM SYSTEM
--- ====================================================================
-local function getFarmFolder()
-    local farmCfg = _G.Config and _G.Config.AutoFarm
-    if not farmCfg then return nil end
-    if farmCfg.FolderType == "BigFish" then
-        return Workspace:FindFirstChild("BigFish")
-    else
-        local ws = Workspace:FindFirstChild("WorldSpawn")
-        return ws and ws:FindFirstChild(farmCfg.FolderType)
-    end
-end
-
-local _farmTargetCache = nil
-
-local function getClosestTarget()
-    local farmCfg = _G.Config.AutoFarm
-    local folder  = getFarmFolder()
-    if not folder or not farmCfg.TargetName or farmCfg.TargetName == "" then return nil end
-
-    local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    if not myRoot then return nil end
-
-    if _farmTargetCache and _farmTargetCache.Parent then
-        return _farmTargetCache
-    end
-
-    local myPos = myRoot.Position
-    local closest, shortest = nil, math.huge
-
-    for _, obj in ipairs(folder:GetChildren()) do
-        if not isDecoration(obj.Name) and obj.Name == farmCfg.TargetName then
-            local root = obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")
-            if root then
-                local dist = (myPos - root.Position).Magnitude
-                if dist < shortest then shortest = dist; closest = obj end
-            end
-        end
-    end
-
-    _farmTargetCache = closest
-    return closest
-end
-
-task.spawn(function()
-    local folder = getFarmFolder()
-    if folder then
-        folder.ChildRemoved:Connect(function(child)
-            if _farmTargetCache == child then _farmTargetCache = nil end
-        end)
-    end
-end)
-
-local _eventsFolder = nil
-local function getEventsFolder()
-    if _eventsFolder then return _eventsFolder end
-    local ev = ReplicatedStorage:FindFirstChild("Events")
-    if ev then _eventsFolder = ev:FindFirstChild("Tools") end
-    return _eventsFolder
-end
-
-task.spawn(function()
-    while true do
-        local farmCfg = _G.Config and _G.Config.AutoFarm
-
-        if not farmCfg or not farmCfg.Enabled then
-            task.wait(0.5)
-            continue
-        end
-
-        local character = LocalPlayer.Character
-        local myRoot    = character and character:FindFirstChild("HumanoidRootPart")
-        local humanoid  = character and character:FindFirstChildOfClass("Humanoid")
-
-        if myRoot and humanoid then
-            local targetObj = getClosestTarget()
-            if targetObj then
-                local targetPart = targetObj.PrimaryPart or targetObj:FindFirstChildWhichIsA("BasePart")
-                if targetPart then
-                    local targetPos = targetPart.Position
-                    local spawnPos  = targetPos + (farmCfg.DistanceOffset or Vector3.new(0, 3, 3))
-                    myRoot.CFrame   = CFrame.lookAt(spawnPos, targetPos)
-
-                    local tool = character:FindFirstChildOfClass("Tool")
-                    if not tool then
-                        local bt = LocalPlayer.Backpack:FindFirstChildOfClass("Tool")
-                        if bt then humanoid:EquipTool(bt); tool = bt; task.wait(0.1) end
-                    end
-
-                    if tool then tool:Activate() end
-
-                    local evf = getEventsFolder()
-                    if evf then
-                        local chargeEvent = evf:FindFirstChild("Charge")
-                        local attackEvent = evf:FindFirstChild("Attack")
-                        if chargeEvent then chargeEvent:FireServer({Target = targetPart, HitPosition = targetPos}) end
-                        if attackEvent  then attackEvent:FireServer({Target = targetPart, HitPosition = targetPos, Tool = tool}) end
-                    end
-                end
-            end
-        end
-
-        task.wait(farmCfg.AttackDelay or 0.3)
-    end
-end)
 
 -- ====================================================================
 --            BIG FISH HITBOX EXPANDER
@@ -480,49 +366,6 @@ task.spawn(function()
 end)
 
 -- ====================================================================
---                       VEHICLE TELEPORT SYSTEM
--- ====================================================================
-local savedVehicleCFrame = nil
-
-local function getTargetRoot()
-    local character = LocalPlayer.Character
-    if not character then return nil end
-    local humanoid = character:FindFirstChildOfClass("Humanoid")
-    if not humanoid then return nil end
-    if humanoid.SeatPart and humanoid.SeatPart:IsA("VehicleSeat") then
-        local vehicle = humanoid.SeatPart.Parent
-        return vehicle.PrimaryPart or humanoid.SeatPart, true
-    elseif humanoid.SeatPart then
-        return humanoid.SeatPart.Parent.PrimaryPart or humanoid.SeatPart, true
-    else
-        return character:FindFirstChild("HumanoidRootPart"), false
-    end
-end
-
-local function saveVehiclePos()
-    local root = getTargetRoot()
-    if root then savedVehicleCFrame = root.CFrame; print("[VehicleTP] Точка сохранена!") end
-end
-
-local function tpVehicleToSaved()
-    if not savedVehicleCFrame then warn("[VehicleTP] Точка еще не сохранена!"); return end
-    local root, isVehicle = getTargetRoot()
-    if root then
-        if isVehicle then
-            local vehicle = root:FindFirstAncestorOfClass("Model") or root.Parent
-            for _, part in ipairs(vehicle:GetDescendants()) do
-                if part:IsA("BasePart") then
-                    part.AssemblyLinearVelocity  = Vector3.zero
-                    part.AssemblyAngularVelocity = Vector3.zero
-                end
-            end
-        end
-        root.CFrame = savedVehicleCFrame + Vector3.new(0, 2, 0)
-        print("[VehicleTP] Телепорт выполнен!")
-    end
-end
-
--- ====================================================================
 --                           RENDER LOOP
 -- ====================================================================
 RunService.RenderStepped:Connect(function()
@@ -579,17 +422,6 @@ local function teleportToObject(folder, selectedName)
     if bestRoot then myRoot.CFrame = CFrame.new(bestRoot.Position + Vector3.new(0, 5, 0)) end
 end
 
-local function getGameTime()
-    local clockTime = Workspace:FindFirstChild("ServerData")
-        and Workspace.ServerData:FindFirstChild("CurrentCycle")
-        and Workspace.ServerData.CurrentCycle:FindFirstChild("ClockTime")
-    if not clockTime then return "??Wait??" end
-    local t     = clockTime.Value
-    local hours = math.floor(t)
-    local mins  = math.floor((t - hours) * 60)
-    return string.format("%02d:%02d", hours, mins)
-end
-
 -- ====================================================================
 --                           GLOBAL EXPORTS
 -- ====================================================================
@@ -623,6 +455,139 @@ _G.GetCaveList = function()
     return l
 end
 
-_G.SaveVehiclePos = saveVehiclePos
-_G.TPVehicle      = tpVehicleToSaved
-_G.GetGameTime    = getGameTime
+-- ====================================================================
+--                        TIME HUD GUI WIDGET
+-- ====================================================================
+task.spawn(function()
+    local player    = Players.LocalPlayer or Players:GetPropertyChangedSignal("LocalPlayer"):Wait()
+    local playerGui = player:WaitForChild("PlayerGui")
+
+    -- Игровое время
+    local function getGameTime()
+        local clockTime = Workspace:FindFirstChild("ServerData")
+            and Workspace.ServerData:FindFirstChild("CurrentCycle")
+            and Workspace.ServerData.CurrentCycle:FindFirstChild("ClockTime")
+        if not clockTime then return "--:--" end
+        local t     = clockTime.Value
+        local hours = math.floor(t)
+        local mins  = math.floor((t - hours) * 60)
+        return string.format("%02d:%02d", hours, mins)
+    end
+
+    -- Серверное время (аптайм сервера в формате HH:MM:SS)
+    local function getServerUptime()
+        local ok, t = pcall(function() return workspace:GetServerTimeNow() end)
+        if not ok then return "--:--:--" end
+        local secs  = math.floor(t % 60)
+        local mins  = math.floor(t / 60 % 60)
+        local hours = math.floor(t / 3600 % 24)
+        return string.format("%02d:%02d:%02d", hours, mins, secs)
+    end
+
+    -- Скрытие оригинального ClockGP
+    local function hideGameClock()
+        local retroHud = playerGui:FindFirstChild("RetroHUD")
+        if retroHud then
+            local right = retroHud:FindFirstChild("Right")
+            if right then
+                local clock = right:FindFirstChild("ClockGP")
+                if clock then
+                    if clock:IsA("GuiObject") then clock.Visible = false end
+                    for _, child in ipairs(clock:GetDescendants()) do
+                        if child:IsA("GuiObject") then child.Visible = false end
+                    end
+                end
+            end
+        end
+    end
+
+    hideGameClock()
+    playerGui.ChildAdded:Connect(function(child)
+        if child.Name == "RetroHUD" then task.wait(0.1); hideGameClock() end
+    end)
+
+    local guiParent = playerGui
+    if gethui then
+        guiParent = gethui()
+    elseif syn and syn.protect_gui then
+        local sg = Instance.new("ScreenGui")
+        syn.protect_gui(sg)
+        guiParent = sg
+    end
+
+    local oldHud = guiParent:FindFirstChild("LunarTimeHUD")
+    if oldHud then oldHud:Destroy() end
+
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name        = "LunarTimeHUD"
+    screenGui.ResetOnSpawn = false
+    screenGui.Parent      = guiParent
+
+    -- Главный контейнер
+    local mainFrame = Instance.new("Frame")
+    mainFrame.Name                 = "MainFrame"
+    mainFrame.Size                 = UDim2.new(0, 190, 0, 72)
+    mainFrame.Position             = _G.SavedClockPosition or UDim2.new(0.514989555, 0, 0.5, 0)
+    mainFrame.BackgroundColor3     = Color3.fromRGB(15, 15, 20)
+    mainFrame.BackgroundTransparency = 0.15
+    mainFrame.BorderSizePixel      = 0
+    mainFrame.Active               = true
+    mainFrame.Draggable            = true
+    mainFrame.Parent               = screenGui
+
+    mainFrame:GetPropertyChangedSignal("Position"):Connect(function()
+        _G.SavedClockPosition = mainFrame.Position
+    end)
+
+    local frameCorner = Instance.new("UICorner")
+    frameCorner.CornerRadius = UDim.new(0, 10)
+    frameCorner.Parent       = mainFrame
+
+    local frameStroke = Instance.new("UIStroke")
+    frameStroke.Color           = Color3.fromRGB(255, 255, 255)
+    frameStroke.Thickness       = 1.8
+    frameStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    frameStroke.Parent          = mainFrame
+
+    -- Иконка
+    local iconLabel = Instance.new("TextLabel")
+    iconLabel.Name               = "Icon"
+    iconLabel.Size               = UDim2.new(0, 30, 0, 30)
+    iconLabel.Position           = UDim2.new(0, 8, 0.5, -15)
+    iconLabel.BackgroundTransparency = 1
+    iconLabel.Text               = "🕒"
+    iconLabel.TextSize           = 18
+    iconLabel.Parent             = mainFrame
+
+    -- GAME строка
+    local gameTimeLabel = Instance.new("TextLabel")
+    gameTimeLabel.Name               = "GameTime"
+    gameTimeLabel.Size               = UDim2.new(1, -45, 0, 22)
+    gameTimeLabel.Position           = UDim2.new(0, 40, 0, 5)
+    gameTimeLabel.BackgroundTransparency = 1
+    gameTimeLabel.TextColor3         = Color3.fromRGB(255, 255, 255)
+    gameTimeLabel.TextXAlignment     = Enum.TextXAlignment.Left
+    gameTimeLabel.Font               = Enum.Font.GothamBold
+    gameTimeLabel.TextSize           = 15
+    gameTimeLabel.Text               = "GAME: --:--"
+    gameTimeLabel.Parent             = mainFrame
+
+    -- REAL строка
+    local realTimeLabel = Instance.new("TextLabel")
+    realTimeLabel.Name               = "RealTime"
+    realTimeLabel.Size               = UDim2.new(1, -45, 0, 16)
+    realTimeLabel.Position           = UDim2.new(0, 40, 0, 24)
+    realTimeLabel.BackgroundTransparency = 1
+    realTimeLabel.TextColor3         = Color3.fromRGB(160, 160, 175)
+    realTimeLabel.TextXAlignment     = Enum.TextXAlignment.Left
+    realTimeLabel.Font               = Enum.Font.GothamMedium
+    realTimeLabel.TextSize           = 12
+    realTimeLabel.Text               = "REAL: --:--:--"
+    realTimeLabel.Parent             = mainFrame
+
+    -- Цикл обновления
+    while task.wait(1) do
+        gameTimeLabel.Text   = "GAME: " .. getGameTime()
+        realTimeLabel.Text   = "REAL: " .. os.date("%H:%M:%S")
+    end
+end)
