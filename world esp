@@ -1,4 +1,49 @@
 -- ====================================================================
+--                      ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+-- ====================================================================
+local function safeMouseMoveRel(x, y)
+    pcall(function() mousemoverel(x, y) end)
+end
+
+local function CalculateChance(pct)
+    return math.random(1, 100) <= math.floor(pct)
+end
+
+local function getDirection(origin, position)
+    return (position - origin).Unit * 1000
+end
+
+local function IsPlayerVisible(player)
+    local pc  = player.Character
+    local lpc = LocalPlayer.Character
+    if not pc or not lpc then return false end
+    local root = FindFirstChild(pc, Config.SilentAimTargetPart)
+              or FindFirstChild(pc, "HumanoidRootPart")
+    if not root then return false end
+    return #GetPartsObscuringTarget({root.Position}, {lpc, pc}) == 0
+end
+
+local function RunRegisteredScript(key)
+    local data = ScriptRegistry[key]
+    if not data then return end
+    Library:Notify("Loading " .. key .. "...", 2)
+    local ok, err = pcall(function()
+        local src = game:HttpGet(data.Url)
+        local fn, compileErr = loadstring(src)
+        if not fn then
+            error("Compile error: " .. tostring(compileErr))
+        end
+        fn()
+    end)
+    if ok then
+        Library:Notify(key .. " loaded!", 2)
+    else
+        Library:Notify("Error: " .. tostring(err), 4)
+        warn("[RunRegisteredScript] " .. key .. " failed: " .. tostring(err))
+    end
+end
+
+-- ====================================================================
 --                      SERVICES & DEPENDENCIES
 -- ====================================================================
 local Players           = game:GetService("Players")
@@ -509,12 +554,12 @@ task.spawn(function()
     local mainFrame = Instance.new("Frame")
     mainFrame.Name                   = "MainFrame"
     mainFrame.Size                   = UDim2.new(0, 190, 0, 72)
-    mainFrame.Position               = _G.SavedClockPosition or UDim2.new(0.514989555, 864, 0.5, -695)
+    mainFrame.Position               = _G.SavedClockPosition or UDim2.new(0.514989555, 800, 0.5, -695)
     mainFrame.BackgroundColor3       = Color3.fromRGB(15, 15, 20)
     mainFrame.BackgroundTransparency = 0.35
     mainFrame.BorderSizePixel        = 0
     mainFrame.Active                 = true
-    mainFrame.Draggable              = true
+    mainFrame.Draggable              = false
     mainFrame.Parent                 = screenGui
 
     mainFrame:GetPropertyChangedSignal("Position"):Connect(function()
