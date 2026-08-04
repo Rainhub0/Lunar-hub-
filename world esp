@@ -72,6 +72,12 @@ _G.Config = {
         TreeFilter   = {}
     },
     Caves    = {},
+    AutoFarm = {
+        Enabled     = false,
+        TargetName  = "Odd Stone",
+        FolderType  = "Ores",
+        AttackDelay = 0.3
+    },
 }
 
 _G.WorldESPConfig = _G.Config.WorldESP
@@ -113,6 +119,16 @@ local function LoadConfig()
             end
         end
     end
+
+    if result.AutoFarm then
+        local farm, res = _G.Config.AutoFarm, result.AutoFarm
+        farm.Enabled     = res.Enabled     or false
+        farm.TargetName  = res.TargetName  or "Odd Stone"
+        farm.FolderType  = res.FolderType  or "Ores"
+        farm.AttackDelay = res.AttackDelay or 0.3
+    end
+end  -- <- этот end был пропущен в твоей версии
+
 local function SaveConfig()
     local ok, err = pcall(function()
         local fishCfg, espCfg = _G.Config.FishHitbox, _G.Config.WorldESP
@@ -135,6 +151,12 @@ local function SaveConfig()
                 OreColor  = {R = math.floor(espCfg.OreColor.R  * 255), G = math.floor(espCfg.OreColor.G  * 255), B = math.floor(espCfg.OreColor.B  * 255)},
                 TreeColor = {R = math.floor(espCfg.TreeColor.R * 255), G = math.floor(espCfg.TreeColor.G * 255), B = math.floor(espCfg.TreeColor.B * 255)},
                 FishColor = {R = math.floor(espCfg.FishColor.R * 255), G = math.floor(espCfg.FishColor.G * 255), B = math.floor(espCfg.FishColor.B * 255)}
+            },
+            AutoFarm = {
+                Enabled     = _G.Config.AutoFarm.Enabled,
+                TargetName  = _G.Config.AutoFarm.TargetName,
+                FolderType  = _G.Config.AutoFarm.FolderType,
+                AttackDelay = _G.Config.AutoFarm.AttackDelay
             },
             Caves = cavesData
         }))
@@ -446,7 +468,6 @@ task.spawn(function()
     local player    = Players.LocalPlayer or Players:GetPropertyChangedSignal("LocalPlayer"):Wait()
     local playerGui = player:WaitForChild("PlayerGui")
 
-    -- Игровое время
     local function getGameTime()
         local clockTime = Workspace:FindFirstChild("ServerData")
             and Workspace.ServerData:FindFirstChild("CurrentCycle")
@@ -458,7 +479,6 @@ task.spawn(function()
         return string.format("%02d:%02d", hours, mins)
     end
 
-    -- Серверное время (аптайм сервера в формате HH:MM:SS)
     local function getServerUptime()
         local ok, t = pcall(function() return workspace:GetServerTimeNow() end)
         if not ok then return "--:--:--" end
@@ -468,7 +488,6 @@ task.spawn(function()
         return string.format("%02d:%02d:%02d", hours, mins, secs)
     end
 
-    -- Скрытие оригинального ClockGP
     local function hideGameClock()
         local retroHud = playerGui:FindFirstChild("RetroHUD")
         if retroHud then
@@ -503,21 +522,20 @@ task.spawn(function()
     if oldHud then oldHud:Destroy() end
 
     local screenGui = Instance.new("ScreenGui")
-    screenGui.Name        = "LunarTimeHUD"
+    screenGui.Name         = "LunarTimeHUD"
     screenGui.ResetOnSpawn = false
-    screenGui.Parent      = guiParent
+    screenGui.Parent       = guiParent
 
-    -- Главный контейнер
     local mainFrame = Instance.new("Frame")
-    mainFrame.Name                 = "MainFrame"
-    mainFrame.Size                 = UDim2.new(0, 190, 0, 72)
-    mainFrame.Position             = _G.SavedClockPosition or UDim2.new(0.514989555, 0, 0.5, 0)
-    mainFrame.BackgroundColor3     = Color3.fromRGB(15, 15, 20)
+    mainFrame.Name                   = "MainFrame"
+    mainFrame.Size                   = UDim2.new(0, 190, 0, 72)
+    mainFrame.Position               = _G.SavedClockPosition or UDim2.new(0.514989555, 0, 0.5, 0)
+    mainFrame.BackgroundColor3       = Color3.fromRGB(15, 15, 20)
     mainFrame.BackgroundTransparency = 0.15
-    mainFrame.BorderSizePixel      = 0
-    mainFrame.Active               = true
-    mainFrame.Draggable            = true
-    mainFrame.Parent               = screenGui
+    mainFrame.BorderSizePixel        = 0
+    mainFrame.Active                 = true
+    mainFrame.Draggable              = true
+    mainFrame.Parent                 = screenGui
 
     mainFrame:GetPropertyChangedSignal("Position"):Connect(function()
         _G.SavedClockPosition = mainFrame.Position
@@ -533,7 +551,6 @@ task.spawn(function()
     frameStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
     frameStroke.Parent          = mainFrame
 
-    -- Иконка
     local iconLabel = Instance.new("TextLabel")
     iconLabel.Name               = "Icon"
     iconLabel.Size               = UDim2.new(0, 30, 0, 30)
@@ -543,7 +560,6 @@ task.spawn(function()
     iconLabel.TextSize           = 18
     iconLabel.Parent             = mainFrame
 
-    -- GAME строка
     local gameTimeLabel = Instance.new("TextLabel")
     gameTimeLabel.Name               = "GameTime"
     gameTimeLabel.Size               = UDim2.new(1, -45, 0, 22)
@@ -556,7 +572,6 @@ task.spawn(function()
     gameTimeLabel.Text               = "GAME: --:--"
     gameTimeLabel.Parent             = mainFrame
 
-    -- REAL строка
     local realTimeLabel = Instance.new("TextLabel")
     realTimeLabel.Name               = "RealTime"
     realTimeLabel.Size               = UDim2.new(1, -45, 0, 16)
@@ -569,9 +584,21 @@ task.spawn(function()
     realTimeLabel.Text               = "REAL: --:--:--"
     realTimeLabel.Parent             = mainFrame
 
-    -- Цикл обновления
+    local serverTimeLabel = Instance.new("TextLabel")
+    serverTimeLabel.Name               = "ServerTime"
+    serverTimeLabel.Size               = UDim2.new(1, -45, 0, 16)
+    serverTimeLabel.Position           = UDim2.new(0, 40, 0, 43)
+    serverTimeLabel.BackgroundTransparency = 1
+    serverTimeLabel.TextColor3         = Color3.fromRGB(120, 200, 130)
+    serverTimeLabel.TextXAlignment     = Enum.TextXAlignment.Left
+    serverTimeLabel.Font               = Enum.Font.GothamMedium
+    serverTimeLabel.TextSize           = 12
+    serverTimeLabel.Text               = "SRV:  --:--:--"
+    serverTimeLabel.Parent             = mainFrame
+
     while task.wait(1) do
         gameTimeLabel.Text   = "GAME: " .. getGameTime()
         realTimeLabel.Text   = "REAL: " .. os.date("%H:%M:%S")
+        serverTimeLabel.Text = "SRV:  " .. getServerUptime()
     end
 end)
