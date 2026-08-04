@@ -113,16 +113,6 @@ local function LoadConfig()
             end
         end
     end
-
-    if result.AutoFarm then
-        local farm, res = _G.Config.AutoFarm, result.AutoFarm
-        farm.Enabled     = res.Enabled     or false
-        farm.TargetName  = res.TargetName  or "Odd Stone"
-        farm.FolderType  = res.FolderType  or "Ores"
-        farm.AttackDelay = res.AttackDelay or 0.3
-    end
-end
-
 local function SaveConfig()
     local ok, err = pcall(function()
         local fishCfg, espCfg = _G.Config.FishHitbox, _G.Config.WorldESP
@@ -145,12 +135,6 @@ local function SaveConfig()
                 OreColor  = {R = math.floor(espCfg.OreColor.R  * 255), G = math.floor(espCfg.OreColor.G  * 255), B = math.floor(espCfg.OreColor.B  * 255)},
                 TreeColor = {R = math.floor(espCfg.TreeColor.R * 255), G = math.floor(espCfg.TreeColor.G * 255), B = math.floor(espCfg.TreeColor.B * 255)},
                 FishColor = {R = math.floor(espCfg.FishColor.R * 255), G = math.floor(espCfg.FishColor.G * 255), B = math.floor(espCfg.FishColor.B * 255)}
-            },
-            AutoFarm = {
-                Enabled     = _G.Config.AutoFarm.Enabled,
-                TargetName  = _G.Config.AutoFarm.TargetName,
-                FolderType  = _G.Config.AutoFarm.FolderType,
-                AttackDelay = _G.Config.AutoFarm.AttackDelay
             },
             Caves = cavesData
         }))
