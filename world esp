@@ -1,4 +1,49 @@
 -- ====================================================================
+--                      ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+-- ====================================================================
+local function safeMouseMoveRel(x, y)
+    pcall(function() mousemoverel(x, y) end)
+end
+
+local function CalculateChance(pct)
+    return math.random(1, 100) <= math.floor(pct)
+end
+
+local function getDirection(origin, position)
+    return (position - origin).Unit * 1000
+end
+
+local function IsPlayerVisible(player)
+    local pc  = player.Character
+    local lpc = LocalPlayer.Character
+    if not pc or not lpc then return false end
+    local root = FindFirstChild(pc, Config.SilentAimTargetPart)
+              or FindFirstChild(pc, "HumanoidRootPart")
+    if not root then return false end
+    return #GetPartsObscuringTarget({root.Position}, {lpc, pc}) == 0
+end
+
+local function RunRegisteredScript(key)
+    local data = ScriptRegistry[key]
+    if not data then return end
+    Library:Notify("Loading " .. key .. "...", 2)
+    local ok, err = pcall(function()
+        local src = game:HttpGet(data.Url)
+        local fn, compileErr = loadstring(src)
+        if not fn then
+            error("Compile error: " .. tostring(compileErr))
+        end
+        fn()
+    end)
+    if ok then
+        Library:Notify(key .. " loaded!", 2)
+    else
+        Library:Notify("Error: " .. tostring(err), 4)
+        warn("[RunRegisteredScript] " .. key .. " failed: " .. tostring(err))
+    end
+end
+
+-- ====================================================================
 --                      SERVICES & DEPENDENCIES
 -- ====================================================================
 local Players           = game:GetService("Players")
@@ -11,7 +56,7 @@ local LocalPlayer = Players.LocalPlayer
 local Camera      = Workspace.CurrentCamera
 
 -- ====================================================================
---                         PERFECT CATCH
+--                          PERFECT CATCH
 -- ====================================================================
 task.spawn(function()
     local AttackEvent
@@ -46,7 +91,7 @@ task.spawn(function()
 end)
 
 -- ====================================================================
---                     UNIFIED CONFIG SYSTEM
+--                      UNIFIED CONFIG SYSTEM
 -- ====================================================================
 pcall(function()
     if not isfolder("LunarHub") then makefolder("LunarHub") end
@@ -113,6 +158,7 @@ local function LoadConfig()
             end
         end
     end
+end -- Closed LoadConfig properly here
 
 local function SaveConfig()
     local ok, err = pcall(function()
@@ -148,7 +194,7 @@ _G.SaveConfig    = SaveConfig
 _G.SaveESPConfig = SaveConfig
 
 -- ====================================================================
---                           WORLD ESP SYSTEM
+--                            WORLD ESP SYSTEM
 -- ====================================================================
 local OreESP  = {}
 local TreeESP = {}
@@ -325,7 +371,7 @@ task.spawn(function()
 end)
 
 -- ====================================================================
---                       ESP WATCHER SETUP
+--                        ESP WATCHER SETUP
 -- ====================================================================
 task.spawn(function()
     local worldSpawn = Workspace:WaitForChild("WorldSpawn", 15)
@@ -351,7 +397,7 @@ task.spawn(function()
 end)
 
 -- ====================================================================
---                           RENDER LOOP
+--                            RENDER LOOP
 -- ====================================================================
 RunService.RenderStepped:Connect(function()
     local espCfg = _G.Config.WorldESP
@@ -363,7 +409,7 @@ RunService.RenderStepped:Connect(function()
 end)
 
 -- ====================================================================
---                           HELPERS & TELEPORTS
+--                            HELPERS & TELEPORTS
 -- ====================================================================
 local function getObjectList(folder, filter)
     local list = {}
@@ -408,7 +454,7 @@ local function teleportToObject(folder, selectedName)
 end
 
 -- ====================================================================
---                           GLOBAL EXPORTS
+--                            GLOBAL EXPORTS
 -- ====================================================================
 _G.GetOreList  = function(filter) return getObjectList(Workspace:FindFirstChild("WorldSpawn") and Workspace.WorldSpawn:FindFirstChild("Ores"),  filter) end
 _G.GetTreeList = function(filter) return getObjectList(Workspace:FindFirstChild("WorldSpawn") and Workspace.WorldSpawn:FindFirstChild("Trees"), filter) end
@@ -510,10 +556,10 @@ task.spawn(function()
     mainFrame.Size                   = UDim2.new(0, 190, 0, 72)
     mainFrame.Position               = _G.SavedClockPosition or UDim2.new(0.514989555, 864, 0.5, -695)
     mainFrame.BackgroundColor3       = Color3.fromRGB(15, 15, 20)
-    mainFrame.BackgroundTransparency = 0.50
+    mainFrame.BackgroundTransparency = 0.35
     mainFrame.BorderSizePixel        = 0
     mainFrame.Active                 = true
-    mainFrame.Draggable              = false
+    mainFrame.Draggable              = true
     mainFrame.Parent                 = screenGui
 
     mainFrame:GetPropertyChangedSignal("Position"):Connect(function()
