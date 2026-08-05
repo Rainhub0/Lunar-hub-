@@ -1,3 +1,12 @@
+-- ==================== ТИХИЙ ANTI-AFK (БЕЗ GUI, ЗАПУСКАЕТСЯ СРАЗУ) ====================
+local VirtualUser = game:GetService("VirtualUser")
+game:GetService("Players").LocalPlayer.Idled:Connect(function()
+    VirtualUser:CaptureController()
+    VirtualUser:ClickButton2(Vector2.new())
+end)
+
+-- ==================== ЗАГРУЗКА ОСНОВНОГО СКРИПТА (БЕЗ АВТОРИЗАЦИИ) ====================
+local function LoadMainScript()
     -- ==================== ЗАГРУЗКА БИБЛИОТЕК ====================
     local Library = loadstring(game:HttpGet("https://gist.githubusercontent.com/Rainhub0/58588fc52c695feec2489c30c689c360/raw/480a043a154529b42ba0bf8cd9d8d0779bc20a24/gistfile1.txt"))()
     local ThemeManager = loadstring(game:HttpGet("https://gist.githubusercontent.com/Rainhub0/97b84c90469bf93f11299098817ab9e6/raw/80461129799c6a3d4c539b8dcd10073fe6eea22d/gistfile1.txt"))()
@@ -15,6 +24,8 @@
     local TweenService     = game:GetService("TweenService")
     local Debris           = game:GetService("Debris")
     local ReplicatedStorage = game:GetService("ReplicatedStorage")
+    local Players          = game:GetService("Players")
+    local CoreGui          = game:GetService("CoreGui")
 
     local LocalPlayer = Players.LocalPlayer
     local Camera      = Workspace.CurrentCamera
@@ -188,95 +199,50 @@
         ExposureCompensation = Lighting.ExposureCompensation,
     }
 
-    -- ===== ФУНКЦИИ ДЛЯ ИНФОРМАЦИИ О КЛЮЧЕ =====
-    local function ParseDuration(dur)
-        if dur == "forever" then return nil end
-        local num, unit = dur:match("^(%d+)(%a)$")
-        if num and unit then
-            local seconds = tonumber(num)
-            if unit == "d" then seconds = seconds * 86400
-            elseif unit == "h" then seconds = seconds * 3600
-            elseif unit == "m" then seconds = seconds * 60
-            else return 0 end
-            return seconds
+    -- ====================================================================
+--                      ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+-- ====================================================================
+local function safeMouseMoveRel(x, y)
+    pcall(function() mousemoverel(x, y) end)
+end
+
+local function CalculateChance(pct)
+    return math.random(1, 100) <= math.floor(pct)
+end
+
+local function getDirection(origin, position)
+    return (position - origin).Unit * 1000
+end
+
+local function IsPlayerVisible(player)
+    local pc  = player.Character
+    local lpc = LocalPlayer.Character
+    if not pc or not lpc then return false end
+    local root = FindFirstChild(pc, Config.SilentAimTargetPart)
+              or FindFirstChild(pc, "HumanoidRootPart")
+    if not root then return false end
+    return #GetPartsObscuringTarget({root.Position}, {lpc, pc}) == 0
+end
+
+local function RunRegisteredScript(key)
+    local data = ScriptRegistry[key]
+    if not data then return end
+    Library:Notify("Loading " .. key .. "...", 2)
+    local ok, err = pcall(function()
+        local src = game:HttpGet(data.Url)
+        local fn, compileErr = loadstring(src)
+        if not fn then
+            error("Compile error: " .. tostring(compileErr))
         end
-        return 0
+        fn()
+    end)
+    if ok then
+        Library:Notify(key .. " loaded!", 2)
+    else
+        Library:Notify("Error: " .. tostring(err), 4)
+        warn("[RunRegisteredScript] " .. key .. " failed: " .. tostring(err))
     end
-
-    local function GetKeyInfo()
-        local key = LoadSavedKey()
-        if not key then return nil end
-        local keyLines = FetchLines(KEYS_URL)
-        local duration = "unknown"
-        for _, line in ipairs(keyLines) do
-            local k, dur, h = line:match("^%s*(.-)%s*:%s*(.-)%s*:%s*(.-)%s*$")
-            if k and k == key then
-                duration = dur
-                break
-            end
-            local k_old, h_old = line:match("^%s*(.-)%s*:%s*(.-)%s*$")
-            if k_old and k_old == key then
-                duration = "forever"
-                break
-            end
-            if line:match("^%s*" .. key .. "%s*$") then
-                duration = "forever"
-                break
-            end
-        end
-        local activationTime = GetActivationTime(key)
-        local remaining = nil
-        if duration ~= "forever" and duration ~= "unknown" and activationTime then
-            local totalSec = ParseDuration(duration)
-            if totalSec then
-                remaining = activationTime + totalSec - os.time()
-            end
-        end
-        return {
-            key = key,
-            duration = duration,
-            activationTime = activationTime,
-            remaining = remaining,
-        }
-    end
-
-    -- ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
-    local function safeMouseMoveRel(x, y)
-        pcall(function() mousemoverel(x, y) end)
-    end
-
-    local function CalculateChance(pct)
-        return math.random(1, 100) <= math.floor(pct)
-    end
-
-    local function getDirection(origin, position)
-        return (position - origin).Unit * 1000
-    end
-
-    local function IsPlayerVisible(player)
-        local pc  = player.Character
-        local lpc = LocalPlayer.Character
-        if not pc or not lpc then return false end
-        local root = FindFirstChild(pc, Config.SilentAimTargetPart)
-                  or FindFirstChild(pc, "HumanoidRootPart")
-        if not root then return false end
-        return #GetPartsObscuringTarget({root.Position}, {lpc, pc}) == 0
-    end
-
-    local function RunRegisteredScript(key)
-        local data = ScriptRegistry[key]
-        if not data then return end
-        Library:Notify("Loading " .. key .. "...", 2)
-        local ok, err = pcall(function()
-            loadstring(game:HttpGet(data.Url))()
-        end)
-        if ok then
-            Library:Notify(key .. " loaded!", 2)
-        else
-            Library:Notify("Error: " .. tostring(err), 4)
-        end
-    end
-
+end
     -- ==================== ОЧИСТКА ЧАМСОВ ====================
     local OriginalPartMaterials = {}
 
@@ -2529,7 +2495,7 @@
     local FishingToggle = FishingGroup:AddToggle('FishingToggle', {
         Text = 'Auto-Fishing',
         Default = false,
-        Visible = false,
+        Visible = true,
         Callback = function(v)
             if _G.FishingConfig then
                 _G.FishingConfig.Enabled = v
@@ -2941,18 +2907,6 @@
         end
     })
 
-    ESP.HitBoxes:AddToggle('AutoFarmToggle', {
-        Text = 'Включить Авто-Фарм',
-        Default = false,
-        Callback = function(v)
-            if _G.Config then
-                if not _G.Config.AutoFarm then _G.Config.AutoFarm = {} end
-                _G.Config.AutoFarm.Enabled = v
-            end
-            if _G.SaveConfig then _G.SaveConfig() end
-        end,
-    })
-
     -- Загрузка WorldESP
     ESP.Ores:AddButton({
         Text = 'RefineryCaves 2 Script',
@@ -3000,7 +2954,6 @@
     -- ============================
     -- TAB: SETTINGS
     -- ============================
-
     local MenuGroup = Tabs.Settings:AddLeftGroupbox('Menu Management')
     MenuGroup:AddLabel('Menu Key')
         :AddKeyPicker('MenuKeybind', {
@@ -3063,24 +3016,5 @@
     end)
 end
 
--- ================================================================
---  ЗАПУСК: ПРОВЕРКА СОХРАНЁННОГО КЛЮЧА → GUI ИЛИ СРАЗУ ЗАГРУЗКА
--- ================================================================
-local function Start()
-    local hwid      = GetHWID()
-    local savedKey  = LoadSavedKey()
-
-    if savedKey and savedKey ~= "" then
-        local result = ValidateKey(savedKey, hwid)
-        if result == "ok" then
-            LoadMainScript()
-        else
-            pcall(function() writefile(KEY_FILE, "") end)
-            ShowKeyGUI(LoadMainScript)
-        end
-    else
-        ShowKeyGUI(LoadMainScript)
-    end
-end
-
-Start()
+-- ==================== ЗАПУСК ОСНОВНОГО СКРИПТА СРАЗУ БЕЗ АВТОРИЗАЦИИ ====================
+LoadMainScript()
