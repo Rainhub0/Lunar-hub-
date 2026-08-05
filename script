@@ -2324,7 +2324,7 @@ end
             Config.ESP.ChamsStyle = v
         end,
     })
-    ChamsMaster:AddToggle('ESPMechChamsToggle', {
+    ESPMaster:AddToggle('ESPMechChamsToggle', {
         Text = 'MechChams (per-part)',
         Default = false,
         Callback = function(v)
